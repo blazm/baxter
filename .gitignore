@@ -1,3 +1,10 @@
+# Custom directories
+
+data/*
+snapshots/*.*
+tmp/*.png
+tf-log/*.*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
