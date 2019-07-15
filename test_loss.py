@@ -1,14 +1,42 @@
-
-
 from keras.losses import binary_crossentropy, mse
 from keras import backend as K
 
-from models import weighted_mean_squared_error
 from utils import preprocess_size, load_parameters, loadAndResizeImages2
 
 def preprocess_size_helper(new_dim=(128, 160)):
     return lambda image: preprocess_size(image, new_dim)
     
+# example of a wrapper loss - generator must output 3 values x, [y, y_p]
+def MAEpw_wrapper(y_prec):
+    def MAEpw(y_true, y_pred):
+        return K.mean(K.square(y_prec * (y_pred - y_true)))
+    return MAEpw
+
+def median_mse_wrapper(y_median):
+    def median_mse(y_true, y_pred):
+        y_prec =  y_median - y_pred
+        return K.mean(K.square(y_prec * (y_pred - y_true)))
+        #return K.mean(K.square((y_median - y_pred) - ( y_true)), axis=-1) #y_median -
+    return median_mse
+
+def mse_wrapper(y_mask):
+    def median_mse(y_true, y_pred):
+        return K.mean(K.square(y_pred - y_true), axis=-1) 
+    return median_mse
+
+def masked_mse_wrapper(y_mask):
+    def mean_squared_error(y_true, y_pred):
+        return K.mean(K.square((y_pred * y_mask) - (y_true * y_mask)), axis=-1)  # y_true * y_mask
+    return mean_squared_error
+
+#def binary_crossentropy(y_true, y_pred):
+#    return K.mean(K.binary_crossentropy(y_true, y_pred), axis=-1)
+
+def masked_binary_crossentropy(y_mask):
+    def binary_crossentropy(y_true, y_pred):
+        return K.mean(K.binary_crossentropy(y_pred*y_mask, y_true*y_mask), axis=-1)
+        #return K.mean(K.binary_crossentropy(y_true*y_mask, y_pred*y_mask), axis=-1)
+    return binary_crossentropy
 
 if __name__ == '__main__':
     parameters_filepath = "config.ini"

@@ -138,6 +138,31 @@ def preprocess_size(image, deconv_layers=5, initial_shape=(5,4)):
 
     return image
 
+from scipy import ndimage
+def preprocess_enhance_edges(image):
+
+    blurred_f = np.empty(image.shape)
+    filter_blurred_f = np.empty(image.shape)
+
+    blurred_f[:,:,0] =  ndimage.gaussian_filter(image[:,:,0], 3)
+    blurred_f[:,:,1] =  ndimage.gaussian_filter(image[:,:,1], 3)
+    blurred_f[:,:,2] =  ndimage.gaussian_filter(image[:,:,2], 3)
+
+    #blurred_f = ndimage.gaussian_filter(image, 3)
+    #increase the weight of edges by adding an approximation of the Laplacian:
+
+    filter_blurred_f[:,:,0] =  ndimage.gaussian_filter(blurred_f[:,:,0], 3)
+    filter_blurred_f[:,:,1] =  ndimage.gaussian_filter(blurred_f[:,:,1], 3)
+    filter_blurred_f[:,:,2] =  ndimage.gaussian_filter(blurred_f[:,:,2], 3)
+
+
+    #filter_blurred_f = ndimage.gaussian_filter(blurred_f, 1)
+    alpha = 0.3
+    sharpened = (1.0 - alpha) * blurred_f + alpha * (blurred_f - filter_blurred_f)
+    return sharpened
+    #edges = filters.scharr(image)
+
+
 def loadAndResizeImages2(path, names=[], preprocessors=[], load_alpha=False):
     images = []
     if not names:

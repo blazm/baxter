@@ -11,7 +11,7 @@ https://arxiv.org/abs/1312.6114
 '''
 
 from keras.layers import Dense, Input
-from keras.layers import Conv2D, Flatten, Lambda, BatchNormalization, MaxPooling2D, UpSampling2D, AveragePooling2D
+from keras.layers import Conv2D, Flatten, Lambda, BatchNormalization, MaxPooling2D, AveragePooling2D, UpSampling2D, AveragePooling2D
 from keras.layers import Reshape, Conv2DTranspose
 from keras.models import Model
 from keras.optimizers import Adam
@@ -25,7 +25,17 @@ import matplotlib.pyplot as plt
 import argparse
 import os
 
-from utils import psnr
+from AdamW import AdamW
+from utils import psnr, load_parameters
+
+from test_loss import median_mse_wrapper, masked_mse_wrapper, masked_binary_crossentropy
+
+# define callback to change the value of beta at each epoch
+beta = K.variable(value=0.0)
+def warmup(epoch):
+    value = (epoch/10.0) * (epoch <= 10.0) + 1.0 * (epoch > 10.0)
+    print("\nbeta:", value)
+    K.set_value(beta, value)
 
 # reparameterization trick
 # instead of sampling from Q(z|X), sample eps = N(0,I)
@@ -53,31 +63,45 @@ def build_vae(img_shape=(28, 28, 1), latent_size=2,
     # network parameters
     h, w, ch = img_shape
     batch_size = 128
-    kernel_size = 3
+    kernel_size = 4
     filters = initial_filters
     latent_dim = latent_size
+    
 
     # VAE model = encoder + decoder
     # build encoder model
     inputs = Input(shape=img_shape, name='encoder_input')
+    mask_inputs = Input(shape=img_shape, name='median_input')
     x = inputs
     for i in range(conv_layers):
-        filters *= 2
-        x = Conv2D(filters=filters,
+        #filters = initial_filters if i < conv_layers-1 else 1
+        conv_lyr = Conv2D(filters=initial_filters,
                 kernel_size=kernel_size,
                 activation='relu',
                 strides=1,
-                padding='same')(x)
+                padding='same', kernel_initializer='glorot_normal', bias_initializer='zeros')
+        x = conv_lyr(x)
+        conv_lyr = Conv2D(filters=initial_filters,
+                kernel_size=kernel_size,
+                activation='relu',
+                strides=2,
+                padding='same', kernel_initializer='glorot_normal', bias_initializer='zeros')
+        x = conv_lyr(x)
+        mp = conv_lyr
         #x = BatchNormalization()(x)
-        x = MaxPooling2D((2,2), padding='same')(x)
+        #mp = AveragePooling2D((2,2), padding='same')
+        #x = MaxPooling2D((2,2), padding='same')(x)
+        #x = mp(x)
 
     # shape info needed to build decoder model
     shape = K.int_shape(x)
+    print(shape)
+    #input()
     encoded_shape = x.get_shape().as_list()
-
+    intermediate_size = encoded_shape[1]*encoded_shape[2]*encoded_shape[3]
     # generate latent vector Q(z|X)
     x = Flatten()(x)
-    x = Dense(latent_size*8, activation='relu')(x)
+    x = Dense(intermediate_size, activation='relu')(x)
     z_mean = Dense(latent_size, name='z_mean')(x)
     z_log_var = Dense(latent_size, name='z_log_var')(x)
 
@@ -91,25 +115,31 @@ def build_vae(img_shape=(28, 28, 1), latent_size=2,
     plot_model(encoder, to_file='vae_cnn_encoder.png', show_shapes=True)
 
     # build decoder model
-    latent_inputs = Input(shape=(latent_size,), name='z_sampling')
-    x = Dense(shape[1] * shape[2] * shape[3], activation='relu')(latent_inputs)
+    latent_inputs = Input(shape=(latent_size,), name='z_input')
+    x = Dense(intermediate_size, activation='relu')(latent_inputs)
     x = Reshape((shape[1], shape[2], shape[3]))(x)
 
     for i in range(conv_layers):
+        filters = initial_filters #if i < conv_layers-1 else 3
         x = Conv2DTranspose(filters=filters,
                             kernel_size=kernel_size,
                             activation='relu',
                             strides=1,
-                            padding='same')(x)
+                            padding='same', kernel_initializer='glorot_normal', bias_initializer='zeros')(x)
+        x = Conv2DTranspose(filters=filters,
+                            kernel_size=kernel_size,
+                            activation='relu',
+                            strides=2,
+                            padding='same', kernel_initializer='glorot_normal', bias_initializer='zeros')(x)
         #x = BatchNormalization()(x)
-        x = UpSampling2D((2,2))(x)
-        filters //= 2
+        #x = UpSampling2D((2,2))(x)
+        #filters = initial_filters if i < conv_layers-1 else 3
 
     outputs = Conv2DTranspose(filters=ch,
                             kernel_size=kernel_size,
-                            activation='linear' if loss != 'bin-xent' else 'sigmoid',
+                            activation='linear' if not 'bin-xent' in loss else 'sigmoid', 
                             padding='same',
-                            name='decoder_output')(x)
+                            name='decoder_output', kernel_initializer='glorot_normal', bias_initializer='zeros')(x)
 
     # instantiate decoder model
     decoder = Model(latent_inputs, outputs, name='decoder')
@@ -118,34 +148,10 @@ def build_vae(img_shape=(28, 28, 1), latent_size=2,
 
     # instantiate VAE model
     outputs = decoder(encoder(inputs)[2])
-    vae = Model(inputs, outputs, name='vae')
-
-    if opt == 'adam':
-        opt = Adam(lr=0.001) # try bigger learning rate
-
-    # VAE loss = mse_loss or xent_loss + kl_loss
     if loss == 'wmse':
-        def weighted_tensor(y_true, factor=100.0):
-            mean = K.mean(y_true, axis=0)
-            y_true = ((mean - y_true) * factor)
-            return y_true
-        
-        inputs = weighted_tensor(inputs)
-        outputs = weighted_tensor(outputs)
-        reconstruction_loss = mse(K.flatten(inputs), K.flatten(outputs))
+        vae = Model([inputs, mask_inputs], outputs, name='vae')
     elif loss == 'mse':
-        reconstruction_loss = mse(K.flatten(inputs), K.flatten(outputs))
-    elif loss == 'binary_crossentropy' or loss == 'bin-xent':
-        reconstruction_loss = binary_crossentropy(K.flatten(inputs),
-                                                  K.flatten(outputs))
-        reconstruction_loss *=  h * w #image_size * image_size
-    
-    #elif loss == 'dssim'
-    #    from dssim import DSSIMObjective
-    #    reconstruction_loss = DSSIMObjective()
-    else:
-        raise NotImplementedError
-    
+        vae = Model(inputs, outputs, name='vae')
     '''
     def vae_loss(x, x_decoded_mean):
         xent_loss = image_size * image_size * binary_crossentropy(x, x_decoded_mean)
@@ -153,7 +159,74 @@ def build_vae(img_shape=(28, 28, 1), latent_size=2,
         return xent_loss + kl_loss
     '''
     
+
+    def vae_r_loss(y_true, y_pred):
+        ######## y_true.shape = (batch size, 3, 64, 64)
+
+        # y_true_flat = K.flatten(y_true)
+        # y_pred_flat = K.flatten(y_pred)
+
+        # MSE
+        r_loss = K.mean(K.square(y_pred - y_true), axis=[1,2,3])
+        #r_loss = K.sum(K.square(y_true - y_pred), axis = [1,2,3])
+        return r_loss
+
+    LEARNING_RATE = 0.001
+    KL_TOLERANCE = 0.5
+    def vae_kl_loss(y_true, y_pred):
+
+        kl_loss = - 0.5 * K.sum(1 + z_log_var - K.square(z_mean) - K.exp(z_log_var), axis = 1)
+        kl_loss = K.maximum(kl_loss, KL_TOLERANCE * latent_size) # 
+        return kl_loss
+
+    def vae_loss(y_true, y_pred):
+        return vae_r_loss(y_true, y_pred) + beta*vae_kl_loss(y_true, y_pred)
     
+    def vae_masked_entropy_loss(y_mask):
+        def masked_vae(y_true, y_pred):
+            y_true *= y_mask
+            y_pred *= y_mask
+            return binary_crossentropy(K.flatten(y_mask), K.flatten(y_pred)) + beta*vae_kl_loss(y_mask, y_pred)
+        return masked_vae
+
+    def vae_entropy_loss(y_true, y_pred):
+        return binary_crossentropy(y_true, y_pred) + beta*vae_kl_loss(y_true, y_pred)
+
+    def vae_mse_loss(y_true, y_pred):
+        return vae_r_loss(y_true, y_pred) + beta*vae_kl_loss(y_true, y_pred) # 
+
+    def vae_masked_mse_wrapper(y_mask):
+        def masked_vae(y_true, y_pred):
+            #y_true *= y_mask
+            #y_pred *= y_mask
+            return vae_r_loss(y_true * y_mask, y_pred * y_mask) + beta*vae_kl_loss(y_true, y_pred) # 
+        return masked_vae
+
+    if opt == 'adam':
+        opt = Adam(lr=LEARNING_RATE)
+    if opt == 'adamw':
+        parameters_filepath = "config.ini"
+        parameters = load_parameters(parameters_filepath)
+        num_epochs = int(parameters["hyperparam"]["num_epochs"])
+        batch_size = int(parameters["hyperparam"]["batch_size"])
+
+        opt = AdamW(lr=LEARNING_RATE, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0., weight_decay=0.025, batch_size=batch_size, samples_per_epoch=1000, epochs=num_epochs)
+
+    # VAE loss = mse_loss or xent_loss + kl_loss
+    if loss == 'wmse':
+        vae.compile(optimizer=opt, loss = vae_masked_mse_wrapper(mask_inputs),  metrics = [vae_r_loss, vae_kl_loss, psnr])
+    elif loss == 'mse':
+        vae.compile(optimizer=opt, loss = vae_mse_loss,  metrics = [vae_mse_loss, vae_kl_loss, psnr])
+    elif loss == 'binary_crossentropy' or loss == 'bin-xent':
+        vae.compile(optimizer=opt, loss = vae_entropy_loss,  metrics = [vae_r_loss, vae_kl_loss, psnr])
+    elif loss == 'weighted_binary_crossentropy' or loss == 'wbin-xent':
+        vae.compile(optimizer=opt, loss = vae_masked_entropy_loss(mask_inputs),  metrics = [vae_r_loss, vae_kl_loss, psnr])
+    else:
+        raise NotImplementedError
+
+    #vae_full.compile(optimizer=opti, loss = vae_loss,  metrics = [vae_r_loss, vae_kl_loss])
+
+    '''
     kl_loss = 1 + z_log_var - K.square(z_mean) - K.exp(z_log_var)
     kl_loss = K.sum(kl_loss, axis=-1)
     kl_loss *= -0.5
@@ -161,8 +234,10 @@ def build_vae(img_shape=(28, 28, 1), latent_size=2,
     vae.metrics = [psnr]
     vae.add_loss(vae_loss)
     vae.compile(optimizer=opt, loss='', metrics=[psnr])
+    '''
+    #vae.compile(optimizer=opt, loss = vae_masked_mse_wrapper(mask_inputs),  metrics = [vae_r_loss, vae_kl_loss, psnr])
     vae.summary()
-    plot_model(vae, to_file='tmp/vae_cnn.png', show_shapes=True)
+    #plot_model(vae, to_file='tmp/vae_cnn.png', show_shapes=True)
 
     return  vae, encoder, decoder, encoded_shape
 

@@ -1,6 +1,7 @@
 # Custom directories
 
 data/*
+trained_models/*
 snapshots/*.*
 tmp/*.png
 tf-log/*.*
