@@ -3,7 +3,7 @@
 
 This is a small framework for training and testing auto-encoding architectures for the purpose of encoding world state representations into latent space and thus efficiently compressing the essential world properties depicted in the training image dataset.
 
-![](header.png)
+![](header.PNG)
 
 ## Installation
 
