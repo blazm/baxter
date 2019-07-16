@@ -100,7 +100,8 @@ def random_data_generator(dir_with_src_images, base_image_filename, object_image
                 ho, wo, cho = o_rot.shape
                 x = np.random.randint(low=0, high=w-wo) # +wo
                 #print((100 / ratio_h))
-                y = np.random.randint(low=(50 / ratio_h)+ho, high=h-ho-(50 / ratio_h))
+                # 30 is the magic number to limit the random placement of objects inside image
+                y = np.random.randint(low=(30 / ratio_h)+ho, high=h-ho-(30 / ratio_h)) 
 
                 #imsave("tmp/{}.png".format("obj_generated_" + str(i)),  o_rot)
 

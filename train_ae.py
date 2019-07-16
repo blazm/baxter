@@ -89,6 +89,10 @@ if __name__ == "__main__":
     test_dir = eval(parameters["dataset"]["test_dir"])
     img_shape = eval(parameters["dataset"]["img_shape"])
 
+    size_factor = float(parameters["synthetic"]["size_factor"])
+    obj_attention = float(parameters["synthetic"]["obj_attention"])
+    back_attention = float(parameters["synthetic"]["back_attention"])
+
     num_epochs = int(parameters["hyperparam"]["num_epochs"])
     batch_size = int(parameters["hyperparam"]["batch_size"])
     latent_size = int(parameters["hyperparam"]["latent_size"])
@@ -141,8 +145,12 @@ if __name__ == "__main__":
     else:
         if int(np.sqrt(latent_size))**2 == latent_size:
             lat_h, lat_w = int(np.sqrt(latent_size)), int(np.sqrt(latent_size))
+            lat_ch = 1
         else:
             import math
+            lat_ch = 1
+            if latent_size % 3 == 0:
+                lat_ch = 3
 
             def divisorGenerator(n):
                 large_divisors = []
@@ -154,15 +162,15 @@ if __name__ == "__main__":
                 for divisor in reversed(large_divisors):
                     yield divisor
 
-            tmp = list(divisorGenerator(latent_size))
+            tmp = list(divisorGenerator(latent_size // lat_ch))
 
             lat_h = int(tmp[len(tmp)//2])
-            lat_w = int(latent_size // lat_h)
+            lat_w = int(latent_size // (lat_h*lat_ch))
 
-    experiment_label = "{}.e{}.bs{}.lat{}.c{}.f{}.opt-{}.loss-{}".format(
-        model_label, num_epochs, batch_size,
+    experiment_label = "{}.osize-{}.oatt-{}.e{}.bs{}.lat{}.c{}.opt-{}.loss-{}".format(
+        model_label, size_factor, obj_attention, num_epochs, batch_size,
         "{:02d}".format(latent_size) if type(latent_size) == int else 'x'.join(map(str,latent_size[1:])), 
-        conv_layers, num_filters, opt, loss)
+        conv_layers, opt, loss)
 
     # copy parameters into snapshots archive
     from shutil import copy2 as copyfile
@@ -276,7 +284,7 @@ if __name__ == "__main__":
         #encoded_imgs = (encoded_imgs - encoded_imgs.min()) / np.ptp(encoded_imgs) * 255.0
         print(encoded_imgs)
         decoded_imgs = decoder.predict(encoded_imgs)
-        print("h, w: ", lat_h, ", ", lat_w)
+        print("h, w, ch: {},{},{}".format(lat_h, lat_w, lat_ch))
         print("encoded MAX / MIN: ", encoded_imgs.max(), " / ", encoded_imgs.min())
         
         print("decoded images shape: ", decoded_imgs.shape)
@@ -294,7 +302,8 @@ if __name__ == "__main__":
 
             # display encoded - vmin and vmax are needed for scaling (otherwise single pixels are drawn as black)
             ax = plt.subplot(3, n, i+1+n)
-            plt.imshow(encoded_imgs[i].reshape(lat_h, lat_w).T, vmin=encoded_imgs.min(), vmax=encoded_imgs.max())
+            plt.imshow(encoded_imgs[i].reshape(lat_h, lat_w, lat_ch) if lat_ch == 3 else encoded_imgs[i].reshape(lat_h, lat_w), 
+                vmin=encoded_imgs.min(), vmax=encoded_imgs.max())
             plt.gray()
             ax.get_xaxis().set_visible(False)
             ax.get_yaxis().set_visible(False)
