@@ -1,6 +1,7 @@
 # Custom directories
 
-data/*
+data/robobo*
+data/datos*
 trained_models/*
 snapshots/*.*
 tmp/*.png
