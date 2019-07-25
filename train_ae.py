@@ -239,6 +239,9 @@ if __name__ == "__main__":
         #plot(history)
 
     if do_test:
+
+        
+
         autoencoder.load_weights('trained_models/{}_weights.h5'.format(experiment_label))
 
         def resize_dataset(dataset, img_shape=(32,32,1)):
@@ -256,22 +259,35 @@ if __name__ == "__main__":
                 input("Press any key...")
 
             #valid_generator = data_generator(valid_dir, valid_images, img_shape=img_shape,  batch_size=batch_size, mode=generator_mode)
-            valid_generator = random_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, batch_size=1)
+            valid_generator = random_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, batch_size=64)
             #valid_generator = data_generator(test_dir, test_images, img_shape=img_shape, batch_size=1, mode=generator_mode)
             h,w,ch = img_shape
             x_test = np.zeros((len(test_images), h, w, ch))
+            
+            x_mask = np.zeros((len(test_images), h, w, ch))
             i = 0
-            for img, _ in valid_generator:
-                #print(img.shape)
+            for [img, mask], out in valid_generator:
+                
                 x_test[i] = img[0] #resize(img, (h, w), anti_aliasing=True)
+                #print(mask[0].shape, mask[0].min(), mask[0].max())
+                x_mask[i] = mask[0]
                 i += 1
                 if i >= len(test_images):
                     break
 
+            # TODO: test if this returns median image n x n x 3
+            back_generator = random_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, batch_size=64)
+            [batch_inputs, batch_masks], batch_outputs = next(back_generator)
+            background = np.median(batch_outputs, axis=0, keepdims=False)
+            print("median image shape: ", background.shape) 
+            #exit()
         else: # if no data, then use mnist
             #valid_generator = data_generator_mnist(x_train, x_test, (img_dim,img_dim,1), False, batch_size)
             x_test = resize_dataset(x_test)
-        
+            background = np.median(x_test, axis=0, keepdims=True)
+            x_mask = x_test - background
+            background = background[0]
+
         #decoded_imgs = autoencoder.predict(x_test)
         print("input images shape: ", x_test.shape)
         encoded_imgs = encoder.predict(x_test)
@@ -282,38 +298,195 @@ if __name__ == "__main__":
         
         # normalize before displaying
         #encoded_imgs = (encoded_imgs - encoded_imgs.min()) / np.ptp(encoded_imgs) * 255.0
-        print(encoded_imgs)
+        #print(encoded_imgs)
         decoded_imgs = decoder.predict(encoded_imgs)
         print("h, w, ch: {},{},{}".format(lat_h, lat_w, lat_ch))
         print("encoded MAX / MIN: ", encoded_imgs.max(), " / ", encoded_imgs.min())
         
+        print("input images shape: ", x_test.shape)
+        print("decoded_imgs images shape: ", decoded_imgs.shape)
+        latent_dreams = encoder.predict(decoded_imgs)
+        dreams = decoder.predict(latent_dreams) # dream the images
+
         print("decoded images shape: ", decoded_imgs.shape)
         import matplotlib.pyplot as plt
 
+        # TODO: evaluate the reconstructed images
+        def cdist(a, b):
+            return np.sqrt(np.sum(np.square(a - b), axis=2)) # axis=2 : sum by channels
+
+        def cdist_average(avg, b):
+            avg = np.tile(avg, b.shape)
+
+        max_cdist = cdist(np.zeros((1, 1, 3)), np.ones((1, 1, 3)))
+        #print("Max cdist: ", max_cdist)
+
+        threshold = .2
+        class_masks_R = np.zeros((len(test_images), h, w, ch))
+        class_masks_B = np.zeros((len(test_images), h, w, ch))
+
+        IoUs = np.zeros((len(test_images)))
+        minRBs = np.zeros((len(test_images)))
+        for i in range(x_test.shape[0]):
+            original = x_test[i]
+            mask = x_mask[i]#.astype(int)
+            
+            reconstructed = decoded_imgs[i]
+            #print(original.max(), original.min(), reconstructed.max(), reconstructed.min())
+            # pass the positive mask pixels:
+            #N_R = mask[(mask / obj_attention) >= .5].shape[0]
+            #N_B = mask[(mask / obj_attention) < .5].shape[0]
+            tmp = (background - original) # np.abs
+            juan_mask = ( tmp > 0 ).astype(float) 
+            #juan_mask = (np.abs(mask - obj_attention) < .001).astype(float) # mask for the robot
+            zero_mask = (~(juan_mask).astype(bool)).astype(float) #((mask - obj_attention) < .5).astype(float) # mask for the background
+            #print("robot pixels mask", mask[(mask / obj_attention) > .5].shape)
+            #print("back pixels mask", mask[(mask / obj_attention) < .5].shape)
+            #print(juan_mask.shape, juan_mask.max(), juan_mask.min())
+
+            #'''
+            cond_R = juan_mask[:, :, 0].astype(bool) == True
+            cond_B = zero_mask[:, :, 0].astype(bool) == True
+            class_masks_R[i][:, :, 0][cond_R] = (cdist(juan_mask * original, juan_mask * reconstructed) < threshold*max_cdist)[cond_R] # RR
+            class_masks_R[i][:, :, 1][cond_R] = (cdist(juan_mask * background, juan_mask * reconstructed) < threshold*max_cdist)[cond_R] # RB
+            class_masks_R[i][:, :, 1][cond_R] = (~class_masks_R[i][:, :, 0].astype(bool) & class_masks_R[i][:, :, 1].astype(bool))[cond_R]
+            class_masks_R[i][:, :, 2][cond_R] = (~class_masks_R[i][:, :, 0].astype(bool) & ~class_masks_R[i][:, :, 1].astype(bool))[cond_R] # RX
+            
+            class_masks_B[i][:, :, 0][cond_B] = (cdist(zero_mask * original, zero_mask * reconstructed) < threshold*max_cdist)[cond_B] # BB
+            class_masks_B[i][:, :, 1][cond_B] = (cdist(zero_mask * background, zero_mask * reconstructed) < threshold*max_cdist)[cond_B] # BR
+            class_masks_B[i][:, :, 1][cond_B] = (~class_masks_B[i][:, :, 0].astype(bool) & class_masks_B[i][:, :, 1].astype(bool))[cond_B]
+            class_masks_B[i][:, :, 2][cond_B] = (~class_masks_B[i][:, :, 0].astype(bool) & ~class_masks_B[i][:, :, 1].astype(bool))[cond_B] # BX
+            
+            N_RR = np.sum(class_masks_R[i][:, :, 0][cond_R]) #[class_masks_R[i][:, :, 0] > .5].shape[0]
+            N_RB = np.sum(class_masks_R[i][:, :, 1][cond_R]) 
+            N_RX = np.sum(class_masks_R[i][:, :, 2][cond_R]) 
+
+            N_BR = np.sum(class_masks_B[i][:, :, 1][cond_B]) #[class_masks_B[i][:, :, 1] > .5].shape[0]
+        
+            if N_RR + N_RB + N_RX < 0.1:
+                IoU = 0
+                __R = 0
+                __B = 0    
+            else:
+                IoU = N_RR / (N_RR + N_BR)
+                __R = N_RR / (N_RR + N_RB + N_RX)  
+                __B = 1.0 / ((N_BR / (N_RR + N_RB + N_RX)) + 1.0) 
+            
+            minRB = min(__R, __B)
+            #print("N_R: ", N_R, "N_RR: ", N_RR, " N_RB: ", N_RB, " N_RX: ", N_RX, " N_BR: ", N_BR)
+            
+            IoUs[i] = IoU
+            minRBs[i] = minRB
+
+            #print(class_masks_B[i].shape, class_masks_B[i].max(), class_masks_B[i].min())
+            label = str(np.random.randint(0, 1000))
+            
+            '''
+            imsave("tmp/{}.png".format("{}_original".format(label)), x_test[i])
+            imsave("tmp/{}.png".format("{}_decoded".format(label)), decoded_imgs[i])
+            imsave("tmp/{}.png".format("{}_Cmask_B".format(label)), class_masks_B[i])
+            imsave("tmp/{}.png".format("{}_Cmask_R".format(label)), class_masks_R[i])
+            imsave("tmp/{}.png".format("{}_Cmask_combo".format(label)), (class_masks_R[i].astype(int) + class_masks_B[i].astype(int)).astype(int))
+            '''        
+            #if i > 5:
+            #    exit()
+        #print("avg. IoU: ", IoUs.mean(), " - ", IoUs.std(), "avg min(R,B): ", minRBs.mean(), " - ", minRBs.std())
+        np.savetxt('snapshots/{}.eval'.format(experiment_label), [IoUs.mean(), IoUs.std(), minRBs.mean(), minRBs.std()], delimiter=",", fmt='%1.5f', newline=' ')
+
         n = 20
-        fig = plt.figure(figsize=(40, 4)) # 20,4 if 10 imgs
+        fig = plt.figure(figsize=(200//4, 70//4)) # 20,4 if 10 imgs
         for i in range(n):
             # display original
-            ax = plt.subplot(3, n, i+1)
+            ax = plt.subplot(7, n, i+1); plt.yticks([])
             plt.imshow(x_test[i]) #.reshape(img_dim, img_dim)
             plt.gray()
             ax.get_xaxis().set_visible(False)
-            ax.get_yaxis().set_visible(False)
+            
+            if i == 0:
+                ax.set_ylabel("original", rotation=90, size='xx-large')
+                ax.set_yticklabels([])  
+            else:
+                ax.get_yaxis().set_visible(False)
 
             # display encoded - vmin and vmax are needed for scaling (otherwise single pixels are drawn as black)
-            ax = plt.subplot(3, n, i+1+n)
+            ax = plt.subplot(7, n, i+1+n); plt.yticks([])
             plt.imshow(encoded_imgs[i].reshape(lat_h, lat_w, lat_ch) if lat_ch == 3 else encoded_imgs[i].reshape(lat_h, lat_w), 
                 vmin=encoded_imgs.min(), vmax=encoded_imgs.max())
             plt.gray()
             ax.get_xaxis().set_visible(False)
-            ax.get_yaxis().set_visible(False)
+            #ax.get_yaxis().set_visible(False)
+
+            if i == 0:
+                ax.set_ylabel("latent", rotation=90, size='xx-large')
+                ax.set_yticklabels([])  
+            else:
+                ax.get_yaxis().set_visible(False)
 
             # display reconstruction
-            ax = plt.subplot(3, n, i+1+2*n)
+            ax = plt.subplot(7, n, i+1+2*n); plt.yticks([])
             plt.imshow(decoded_imgs[i]) # .reshape(img_dim, img_dim)
             plt.gray()
             ax.get_xaxis().set_visible(False)
-            ax.get_yaxis().set_visible(False)
+            #ax.get_yaxis().set_visible(False)
+
+            if i == 0:
+                ax.set_ylabel("decoded", rotation=90, size='xx-large')
+                ax.set_yticklabels([])  
+            else:
+                ax.get_yaxis().set_visible(False)
+            
+            # display dreamed latent space
+            ax = plt.subplot(7, n, i+1+3*n); plt.yticks([])
+            plt.imshow(latent_dreams[i].reshape(lat_h, lat_w, lat_ch) if lat_ch == 3 else encoded_imgs[i].reshape(lat_h, lat_w), 
+                vmin=encoded_imgs.min(), vmax=encoded_imgs.max())
+            plt.gray()
+            ax.get_xaxis().set_visible(False)
+            #ax.get_yaxis().set_visible(False)
+
+            if i == 0:
+                ax.set_ylabel("latent dream", rotation=90, size='xx-large')
+                ax.set_yticklabels([])  
+            else:
+                ax.get_yaxis().set_visible(False)
+            
+            # display dreamed images 
+            ax = plt.subplot(7, n, i+1+4*n); plt.yticks([])
+            plt.imshow(dreams[i])
+            plt.gray()
+            ax.get_xaxis().set_visible(False)
+            #ax.get_yaxis().set_visible(False)
+
+            if i == 0:
+                ax.set_ylabel("decoded dream", rotation=90, size='xx-large')
+                ax.set_yticklabels([])  
+            else:
+                ax.get_yaxis().set_visible(False)
+
+            # display masks
+            ax = plt.subplot(7, n, i+1+5*n); plt.yticks([])
+            plt.imshow(class_masks_R[i]) # .reshape(img_dim, img_dim)
+            plt.gray()
+            ax.get_xaxis().set_visible(False)
+            #ax.get_yaxis().set_visible(False)
+
+            if i == 0:
+                ax.set_ylabel("front mask", rotation=90, size='xx-large')
+                ax.set_yticklabels([])  
+            else:
+                ax.get_yaxis().set_visible(False)
+
+            # display masks
+            ax = plt.subplot(7, n, i+1+6*n); plt.yticks([])
+            plt.imshow(class_masks_B[i]) # .reshape(img_dim, img_dim)
+            plt.gray()
+            ax.get_xaxis().set_visible(False)
+            #ax.get_yaxis().set_visible(False)
+
+            if i == 0:
+                ax.set_ylabel("back mask", rotation=90, size='xx-large')
+                ax.set_yticklabels([])  
+            else:
+                ax.get_yaxis().set_visible(False)
 
         '''
         if interactive:

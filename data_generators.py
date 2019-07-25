@@ -138,6 +138,7 @@ def random_data_generator(dir_with_src_images, base_image_filename, object_image
                     #print("Setting background weights...")
                 #    back_mask = ( tmp <= 0 ).astype(float) + back_attention
                     batch_masks[i] += (1 - np.abs(tmp < 0).astype(int)).astype(float) * back_attention
+                    
                 if blur_masks:
                     #print("Blurring masks....")
                     batch_masks[i] = cv2.blur(batch_masks[i], blur_kernel) # add blur if needed
@@ -290,7 +291,7 @@ if __name__ == '__main__':
     base_image = 'median_image.png'
     object_images = ['circle.png', 'robo.png'] # circle in the first place, as robo can be drawn over it
 
-    fitting_generator = random_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, mode='masked')
+    fitting_generator = random_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape)
 
 
     #fitting_generator.__next__()

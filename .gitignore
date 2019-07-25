@@ -3,9 +3,11 @@
 data/robobo*
 data/datos*
 trained_models/*
-snapshots/*.*
+snapshots/*.pdf
+snapshots/*.ini
+snapshots/*.csv
 tmp/*.png
-tf-log/*.*
+tf-log/*.*/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

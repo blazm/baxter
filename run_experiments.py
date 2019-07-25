@@ -2,6 +2,9 @@
 from os import system
 from utils import set_parameter
 
+import subprocess
+from tqdm import trange
+
 if __name__ == "__main__":
     parameters_filepath = "config.ini"
 
@@ -16,9 +19,9 @@ if __name__ == "__main__":
     #generator_modes = ["sub-mean-noisy", "sub-mean", "noisy", "default"]
 
     # TODO: run experiments
-    latent_dims = [4, 16, 64, 256] 
+    latent_dims = [4, 16, 64] 
     # latent sizes map directly to number of conv layers for AE_conv 
-    conv_layers = [5, 4, 3, 2]
+    conv_layers = [5, 4, 3]
     #obj_weights = [0.1, 0.2, 0.5, 0.8, 0.9, 1.0] # back_weight = 1.0 - obj_weight, loss=wmse, opt=adamw
     obj_weights = [0.33, 0.5, 0.67, 0.8, 0.94, 0.98] # as suggested by Abraham
     models = ['ae_conv', 'vaewm']
@@ -37,12 +40,12 @@ if __name__ == "__main__":
                 for model in models:    
                     for lat_dim, conv_lyrs in zip(latent_dims, conv_layers):
               
-                        set_parameter(parameters_filepath, "general", "do_train", "True")
+                        set_parameter(parameters_filepath, "general", "do_train", "False")
                         set_parameter(parameters_filepath, "general", "do_test", "True")
 
                         set_parameter(parameters_filepath, "synthetic", "size_factor", str(size_factor))
                         set_parameter(parameters_filepath, "synthetic", "obj_attention", str(obj_weight))
-                        set_parameter(parameters_filepath, "synthetic", "back_attention", str("%.2f" % round(1.0 - obj_weight, 2))
+                        set_parameter(parameters_filepath, "synthetic", "back_attention", str("%.2f" % round(1.0 - obj_weight, 2)))
 
                         set_parameter(parameters_filepath, "hyperparam", "latent_size", str(lat_dim))
                         set_parameter(parameters_filepath, "hyperparam", "conv_layers", str(conv_lyrs))
@@ -53,7 +56,8 @@ if __name__ == "__main__":
                         
                         # run training for this exact configuration
                         # DONE: save parameter configuration to enable experiment reproduction (in train.py)
-                        system("python train_ae.py") # TODO: change this to be compatible with Linux as well -- system("source activate tf35;python train_ae.py")
+                        #system("python train_ae.py") # TODO: change this to be compatible with Linux as well -- system("source activate tf35;python train_ae.py")
+                        subprocess.check_output('python train_ae.py', shell=True) 
                         # results will be saved as: trained models, tensorboard logs, pdf, csv, ini
 
     # once trained, we can test all the models
