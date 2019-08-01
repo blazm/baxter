@@ -6,6 +6,7 @@ trained_models/*
 snapshots/*.pdf
 snapshots/*.ini
 snapshots/*.csv
+snapshots/*.eval
 tmp/*.png
 tf-log/*.*/
 

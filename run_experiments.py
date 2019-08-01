@@ -9,7 +9,7 @@ if __name__ == "__main__":
     parameters_filepath = "config.ini"
 
     do_train = True
-    do_test = False
+    do_test = True
 
     # all possible hyperparameter configurations
     #latent_dims = [4, 9, 16, 25, 36, 49, 64, 81, 100] #  , # more or less the same for the rest of the models
@@ -28,6 +28,8 @@ if __name__ == "__main__":
     obj_sizes = [1.0, 2.0, 3.0, 4.0]
     # 64x64x3 - VAE is fixed to this image size
     
+    obj_weights.reverse()
+    obj_sizes.reverse()
 
     if do_train:
         '''
@@ -35,12 +37,18 @@ if __name__ == "__main__":
             for opt in optimizers:
                 for loss in losses:
         '''
-        for size_factor in obj_sizes:
-            for obj_weight in obj_weights:
-                for model in models:    
-                    for lat_dim, conv_lyrs in zip(latent_dims, conv_layers):
-              
-                        set_parameter(parameters_filepath, "general", "do_train", "False")
+        for s in trange(len(obj_sizes)):
+            for w in trange(len(obj_weights)):
+                for m in trange(len(models)):    
+                    for l in trange(len(latent_dims)):
+                        
+                        size_factor = obj_sizes[s]
+                        obj_weight = obj_weights[w]
+                        model = models[m]
+                        lat_dim = latent_dims[l]
+                        conv_lyrs = conv_layers[l]
+                        
+                        set_parameter(parameters_filepath, "general", "do_train", "True")
                         set_parameter(parameters_filepath, "general", "do_test", "True")
 
                         set_parameter(parameters_filepath, "synthetic", "size_factor", str(size_factor))

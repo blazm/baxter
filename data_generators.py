@@ -20,12 +20,24 @@ except:
     ia = None
     iaa = None
 
+def cdist(a, b, keepdims=False):
+    d = np.sqrt(np.sum(np.square(a - b), axis=2))
+    if keepdims:
+        d = np.repeat(d[:,:,np.newaxis], 3, axis=2)
+    return d
+    
+max_cdist = cdist(np.zeros((1, 1, 3)), np.ones((1, 1, 3)))
+
+#def cdist_average(avg_color, b, keepdims=False):
+#    avg_img = np.ones(b.shape) * avg_color
+#    return cdist(avg_img, b, keepdims=False)
+
 def random_rotation(image_array: np.ndarray):
     # pick a random degree of rotation between 25% on the left and 25% on the right
     random_degree = np.random.uniform(-180, 180)
     return rotate(image_array, random_degree)
 
-def random_data_generator(dir_with_src_images, base_image_filename, object_image_list, img_shape=(28, 28, 1), batch_size=32):
+def random_data_generator(dir_with_src_images, base_image_filename, object_image_list, img_shape=(28, 28, 1), batch_size=32, resized_objects=None):
 
     h, w, ch = img_shape
 
@@ -66,13 +78,17 @@ def random_data_generator(dir_with_src_images, base_image_filename, object_image
 
     loss = (parameters["hyperparam"]["loss"])
 
+    # median threshold
+    threshold = .5
+
     # resize to desired size
     orig_h, orig_w, _ = base_image.shape
     ratio_h = orig_h / h
     ratio_w = orig_w / w
     
     base_image = preprocess_size(base_image, (h, w))
-    resized_objects = []
+    if resized_objects is None:
+        resized_objects = []
     for o in objects:
         ho, wo, cho = o.shape
         if ho == wo:
@@ -101,7 +117,7 @@ def random_data_generator(dir_with_src_images, base_image_filename, object_image
                 x = np.random.randint(low=0, high=w-wo) # +wo
                 #print((100 / ratio_h))
                 # 30 is the magic number to limit the random placement of objects inside image
-                y = np.random.randint(low=(30 / ratio_h)+ho, high=h-ho-(30 / ratio_h)) 
+                y = np.random.randint(low=(60 / ratio_h), high=h-ho-(30 / ratio_h)) 
 
                 #imsave("tmp/{}.png".format("obj_generated_" + str(i)),  o_rot)
 
@@ -123,9 +139,10 @@ def random_data_generator(dir_with_src_images, base_image_filename, object_image
             median_min = batch_median[0].min()
             median_max = batch_median[0].max()
             for i in range(0, batch_size):
-                tmp = (batch_median[0] - batch_inputs[i]) # np.abs
-                threshold = (median_max - (median_max - median_min)*0.5)
-                batch_masks[i] = ( tmp > 0 ).astype(float) * obj_attention
+                
+                tmp = cdist(batch_median[0], batch_inputs[i], keepdims=True) # color distance between images
+                mask = (tmp > threshold*max_cdist).astype(float)
+                batch_masks[i] = mask * obj_attention
                 #back_mask = ( tmp <= 0 ).astype(float) + back_attention
 
                 #batch_masks[i][batch_masks[i] > 0.5] += 0.1
@@ -137,7 +154,7 @@ def random_data_generator(dir_with_src_images, base_image_filename, object_image
                 if back_attention > 0.0:
                     #print("Setting background weights...")
                 #    back_mask = ( tmp <= 0 ).astype(float) + back_attention
-                    batch_masks[i] += (1 - np.abs(tmp < 0).astype(int)).astype(float) * back_attention
+                    batch_masks[i] += ((1 - (mask).astype(int)).astype(float) * back_attention)
                     
                 if blur_masks:
                     #print("Blurring masks....")

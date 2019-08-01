@@ -55,7 +55,7 @@ if __name__ == "__main__":
     # random generator config
     dir_with_src_images = 'data\\generated\\'
     base_image = 'median_image.png'
-    object_images = ['circle.png', 'robo.png'] # circle in the first place, as robo can be drawn over it
+    object_images = ['circle-red.png', 'robo-green.png'] # circle in the first place, as robo can be drawn over it
 
     # default config
     img_dim = 32
@@ -218,7 +218,7 @@ if __name__ == "__main__":
         wu_cb = LambdaCallback(on_epoch_end=lambda epoch, log: warmup(epoch))
 
         callbacks=[wu_cb, tb, csv] #  lrate, 
-        steps = 1000 // batch_size #np.ceil(total_images // batch_size)
+        steps = 5000 // batch_size #np.ceil(total_images // batch_size)
         
         history = autoencoder.fit_generator(fitting_generator, steps_per_epoch=steps, epochs=num_epochs, verbose=1, 
             callbacks=callbacks, validation_data=valid_generator, validation_steps=5)
@@ -240,7 +240,7 @@ if __name__ == "__main__":
 
     if do_test:
 
-        
+        resized_objects = []
 
         autoencoder.load_weights('trained_models/{}_weights.h5'.format(experiment_label))
 
@@ -259,7 +259,7 @@ if __name__ == "__main__":
                 input("Press any key...")
 
             #valid_generator = data_generator(valid_dir, valid_images, img_shape=img_shape,  batch_size=batch_size, mode=generator_mode)
-            valid_generator = random_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, batch_size=64)
+            valid_generator = random_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, batch_size=64, resized_objects=resized_objects)
             #valid_generator = data_generator(test_dir, test_images, img_shape=img_shape, batch_size=1, mode=generator_mode)
             h,w,ch = img_shape
             x_test = np.zeros((len(test_images), h, w, ch))
@@ -312,18 +312,20 @@ if __name__ == "__main__":
         import matplotlib.pyplot as plt
 
         # TODO: evaluate the reconstructed images
-        def cdist(a, b):
-            return np.sqrt(np.sum(np.square(a - b), axis=2)) # axis=2 : sum by channels
-
-        def cdist_average(avg, b):
-            avg = np.tile(avg, b.shape)
-
-        max_cdist = cdist(np.zeros((1, 1, 3)), np.ones((1, 1, 3)))
-        #print("Max cdist: ", max_cdist)
-
+        from data_generators import cdist, max_cdist
+        
         threshold = .2
         class_masks_R = np.zeros((len(test_images), h, w, ch))
         class_masks_B = np.zeros((len(test_images), h, w, ch))
+        
+        print("resized objects: ", resized_objects[0].shape)
+        avg_robot1 = resized_objects[0][:,:,:3].mean(axis=(0,1))
+        avg_robot2 = resized_objects[1][:,:,:3].mean(axis=(0,1))
+        
+        print(avg_robot1, avg_robot2)
+        
+        robot1 = np.ones((h, w, ch)) * avg_robot1
+        robot2 = np.ones((h, w, ch)) * avg_robot2
 
         IoUs = np.zeros((len(test_images)))
         minRBs = np.zeros((len(test_images)))
@@ -336,8 +338,9 @@ if __name__ == "__main__":
             # pass the positive mask pixels:
             #N_R = mask[(mask / obj_attention) >= .5].shape[0]
             #N_B = mask[(mask / obj_attention) < .5].shape[0]
-            tmp = (background - original) # np.abs
-            juan_mask = ( tmp > 0 ).astype(float) 
+            tmp = cdist(background, original, keepdims=True) # color distance between images
+            #tmp = (background - original) # np.abs
+            juan_mask = (tmp > threshold*max_cdist).astype(float) #( tmp > 0 ).astype(float) 
             #juan_mask = (np.abs(mask - obj_attention) < .001).astype(float) # mask for the robot
             zero_mask = (~(juan_mask).astype(bool)).astype(float) #((mask - obj_attention) < .5).astype(float) # mask for the background
             #print("robot pixels mask", mask[(mask / obj_attention) > .5].shape)
@@ -347,28 +350,30 @@ if __name__ == "__main__":
             #'''
             cond_R = juan_mask[:, :, 0].astype(bool) == True
             cond_B = zero_mask[:, :, 0].astype(bool) == True
-            class_masks_R[i][:, :, 0][cond_R] = (cdist(juan_mask * original, juan_mask * reconstructed) < threshold*max_cdist)[cond_R] # RR
-            class_masks_R[i][:, :, 1][cond_R] = (cdist(juan_mask * background, juan_mask * reconstructed) < threshold*max_cdist)[cond_R] # RB
-            class_masks_R[i][:, :, 1][cond_R] = (~class_masks_R[i][:, :, 0].astype(bool) & class_masks_R[i][:, :, 1].astype(bool))[cond_R]
-            class_masks_R[i][:, :, 2][cond_R] = (~class_masks_R[i][:, :, 0].astype(bool) & ~class_masks_R[i][:, :, 1].astype(bool))[cond_R] # RX
+            class_masks_R[i][:, :, 1][cond_R] = (cdist(juan_mask * original, juan_mask * reconstructed) < threshold*max_cdist)[cond_R] # RR
+            class_masks_R[i][:, :, 0][cond_R] = (cdist(juan_mask * background, juan_mask * reconstructed) < threshold*max_cdist)[cond_R] # RB
+            class_masks_R[i][:, :, 0][cond_R] = (~class_masks_R[i][:, :, 1].astype(bool) & class_masks_R[i][:, :, 0].astype(bool))[cond_R]
+            class_masks_R[i][:, :, 2][cond_R] = (~class_masks_R[i][:, :, 1].astype(bool) & ~class_masks_R[i][:, :, 0].astype(bool))[cond_R] # RX
             
-            class_masks_B[i][:, :, 0][cond_B] = (cdist(zero_mask * original, zero_mask * reconstructed) < threshold*max_cdist)[cond_B] # BB
-            class_masks_B[i][:, :, 1][cond_B] = (cdist(zero_mask * background, zero_mask * reconstructed) < threshold*max_cdist)[cond_B] # BR
-            class_masks_B[i][:, :, 1][cond_B] = (~class_masks_B[i][:, :, 0].astype(bool) & class_masks_B[i][:, :, 1].astype(bool))[cond_B]
-            class_masks_B[i][:, :, 2][cond_B] = (~class_masks_B[i][:, :, 0].astype(bool) & ~class_masks_B[i][:, :, 1].astype(bool))[cond_B] # BX
+            class_masks_B[i][:, :, 1][cond_B] = (cdist(zero_mask * original, zero_mask * reconstructed) < threshold*max_cdist)[cond_B] # BB
+            class_masks_B[i][:, :, 0][cond_B] = (np.minimum(cdist(zero_mask * robot1, zero_mask * reconstructed),
+                                                            cdist(zero_mask * robot2, zero_mask * reconstructed)) < threshold*max_cdist)[cond_B] # B(R1,R2)
+            class_masks_B[i][:, :, 0][cond_B] = (~class_masks_B[i][:, :, 1].astype(bool) & class_masks_B[i][:, :, 0].astype(bool))[cond_B]
             
-            N_RR = np.sum(class_masks_R[i][:, :, 0][cond_R]) #[class_masks_R[i][:, :, 0] > .5].shape[0]
-            N_RB = np.sum(class_masks_R[i][:, :, 1][cond_R]) 
+            class_masks_B[i][:, :, 2][cond_B] = (~class_masks_B[i][:, :, 1].astype(bool) & ~class_masks_B[i][:, :, 0].astype(bool))[cond_B] # BX
+            
+            N_RR = np.sum(class_masks_R[i][:, :, 1][cond_R]) #[class_masks_R[i][:, :, 0] > .5].shape[0]
+            N_RB = np.sum(class_masks_R[i][:, :, 0][cond_R]) 
             N_RX = np.sum(class_masks_R[i][:, :, 2][cond_R]) 
 
-            N_BR = np.sum(class_masks_B[i][:, :, 1][cond_B]) #[class_masks_B[i][:, :, 1] > .5].shape[0]
+            N_BR = np.sum(class_masks_B[i][:, :, 0][cond_B]) #[class_masks_B[i][:, :, 1] > .5].shape[0]
         
             if N_RR + N_RB + N_RX < 0.1:
                 IoU = 0
                 __R = 0
                 __B = 0    
             else:
-                IoU = N_RR / (N_RR + N_BR)
+                IoU = N_RR / (N_RR + N_BR + N_RB + N_RX)
                 __R = N_RR / (N_RR + N_RB + N_RX)  
                 __B = 1.0 / ((N_BR / (N_RR + N_RB + N_RX)) + 1.0) 
             
@@ -397,7 +402,7 @@ if __name__ == "__main__":
         fig = plt.figure(figsize=(200//4, 70//4)) # 20,4 if 10 imgs
         for i in range(n):
             # display original
-            ax = plt.subplot(7, n, i+1); plt.yticks([])
+            ax = plt.subplot(6, n, i+1); plt.yticks([])
             plt.imshow(x_test[i]) #.reshape(img_dim, img_dim)
             plt.gray()
             ax.get_xaxis().set_visible(False)
@@ -409,7 +414,7 @@ if __name__ == "__main__":
                 ax.get_yaxis().set_visible(False)
 
             # display encoded - vmin and vmax are needed for scaling (otherwise single pixels are drawn as black)
-            ax = plt.subplot(7, n, i+1+n); plt.yticks([])
+            ax = plt.subplot(6, n, i+1+n); plt.yticks([])
             plt.imshow(encoded_imgs[i].reshape(lat_h, lat_w, lat_ch) if lat_ch == 3 else encoded_imgs[i].reshape(lat_h, lat_w), 
                 vmin=encoded_imgs.min(), vmax=encoded_imgs.max())
             plt.gray()
@@ -423,7 +428,7 @@ if __name__ == "__main__":
                 ax.get_yaxis().set_visible(False)
 
             # display reconstruction
-            ax = plt.subplot(7, n, i+1+2*n); plt.yticks([])
+            ax = plt.subplot(6, n, i+1+2*n); plt.yticks([])
             plt.imshow(decoded_imgs[i]) # .reshape(img_dim, img_dim)
             plt.gray()
             ax.get_xaxis().set_visible(False)
@@ -435,8 +440,22 @@ if __name__ == "__main__":
             else:
                 ax.get_yaxis().set_visible(False)
             
+            
+            # display masks
+            ax = plt.subplot(6, n, i+1+3*n); plt.yticks([])
+            plt.imshow(class_masks_R[i] + class_masks_B[i]*0.3) # .reshape(img_dim, img_dim)
+            plt.gray()
+            ax.get_xaxis().set_visible(False)
+            #ax.get_yaxis().set_visible(False)
+
+            if i == 0:
+                ax.set_ylabel("front mask", rotation=90, size='xx-large')
+                ax.set_yticklabels([])  
+            else:
+                ax.get_yaxis().set_visible(False)
+
             # display dreamed latent space
-            ax = plt.subplot(7, n, i+1+3*n); plt.yticks([])
+            ax = plt.subplot(6, n, i+1+4*n); plt.yticks([])
             plt.imshow(latent_dreams[i].reshape(lat_h, lat_w, lat_ch) if lat_ch == 3 else encoded_imgs[i].reshape(lat_h, lat_w), 
                 vmin=encoded_imgs.min(), vmax=encoded_imgs.max())
             plt.gray()
@@ -450,7 +469,7 @@ if __name__ == "__main__":
                 ax.get_yaxis().set_visible(False)
             
             # display dreamed images 
-            ax = plt.subplot(7, n, i+1+4*n); plt.yticks([])
+            ax = plt.subplot(6, n, i+1+5*n); plt.yticks([])
             plt.imshow(dreams[i])
             plt.gray()
             ax.get_xaxis().set_visible(False)
@@ -462,19 +481,8 @@ if __name__ == "__main__":
             else:
                 ax.get_yaxis().set_visible(False)
 
-            # display masks
-            ax = plt.subplot(7, n, i+1+5*n); plt.yticks([])
-            plt.imshow(class_masks_R[i]) # .reshape(img_dim, img_dim)
-            plt.gray()
-            ax.get_xaxis().set_visible(False)
-            #ax.get_yaxis().set_visible(False)
-
-            if i == 0:
-                ax.set_ylabel("front mask", rotation=90, size='xx-large')
-                ax.set_yticklabels([])  
-            else:
-                ax.get_yaxis().set_visible(False)
-
+            
+            '''
             # display masks
             ax = plt.subplot(7, n, i+1+6*n); plt.yticks([])
             plt.imshow(class_masks_B[i]) # .reshape(img_dim, img_dim)
@@ -487,6 +495,7 @@ if __name__ == "__main__":
                 ax.set_yticklabels([])  
             else:
                 ax.get_yaxis().set_visible(False)
+            '''
 
         '''
         if interactive:
