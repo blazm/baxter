@@ -2,6 +2,8 @@
 
 data/robobo*
 data/datos*
+data/baxter_hand*
+data/Chorna*
 trained_models/*
 snapshots/*.pdf
 snapshots/*.ini

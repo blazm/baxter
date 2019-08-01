@@ -52,8 +52,10 @@ def load_data(shape=(28, 28, 1)):
 
 if __name__ == "__main__":
 
+    
+    from pathlib import Path
     # random generator config
-    dir_with_src_images = 'data\\generated\\'
+    dir_with_src_images = Path('data/generated/')
     base_image = 'median_image.png'
     object_images = ['circle-red.png', 'robo-green.png'] # circle in the first place, as robo can be drawn over it
 

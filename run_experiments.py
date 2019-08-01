@@ -5,6 +5,8 @@ from utils import set_parameter
 import subprocess
 from tqdm import trange
 
+import platform
+
 if __name__ == "__main__":
     parameters_filepath = "config.ini"
 
@@ -65,7 +67,10 @@ if __name__ == "__main__":
                         # run training for this exact configuration
                         # DONE: save parameter configuration to enable experiment reproduction (in train.py)
                         #system("python train_ae.py") # TODO: change this to be compatible with Linux as well -- system("source activate tf35;python train_ae.py")
+                        #if platform.system() == 'Windows':
                         subprocess.check_output('python train_ae.py', shell=True) 
+                        #else:
+                        #    system("source activate python35;python train_ae.py")
                         # results will be saved as: trained models, tensorboard logs, pdf, csv, ini
 
     # once trained, we can test all the models

@@ -170,9 +170,15 @@ def loadAndResizeImages2(path, names=[], preprocessors=[], load_alpha=False):
 
     for name in names:
         if '.png' in name and load_alpha:
-            img = imread(os.path.join(path, name), mode='RGBA')
+            try:
+                img = imread(os.path.join(path, name), mode='RGBA')
+            except TypeError:
+                img = imread(path / name, mode='RGBA')
         else:
-            img = imread(os.path.join(path, name), mode='RGB')
+            try:
+                img = imread(os.path.join(path, name), mode='RGB')
+            except TypeError:
+                img = imread(path / name, mode='RGB')
         #img = preprocess_enhance_edges(img)
         #img = preprocess_size(img, deconv_layers=deconv_layers)
         images.append(img)
