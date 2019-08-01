@@ -438,7 +438,7 @@ if __name__ == "__main__":
 
             # display reconstruction
             ax = plt.subplot(6, n, i+1+2*n); plt.yticks([])
-            plt.imshow(decoded_imgs[i], vmin=decoded_imgs.min(), vmax=decoded_imgs.max()) # .reshape(img_dim, img_dim)
+            plt.imshow(decoded_imgs[i], vmin=decoded_imgs[i].min(), vmax=decoded_imgs[i].max()) # .reshape(img_dim, img_dim)
             plt.gray()
             ax.get_xaxis().set_visible(False)
             #ax.get_yaxis().set_visible(False)
@@ -479,7 +479,7 @@ if __name__ == "__main__":
             
             # display dreamed images 
             ax = plt.subplot(6, n, i+1+5*n); plt.yticks([])
-            plt.imshow(dreams[i], vmin=dreams.min(), vmax=dreams.max())
+            plt.imshow(dreams[i], vmin=dreams[i].min(), vmax=dreams[i].max())
             plt.gray()
             ax.get_xaxis().set_visible(False)
             #ax.get_yaxis().set_visible(False)
