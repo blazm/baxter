@@ -438,7 +438,7 @@ if __name__ == "__main__":
 
             # display reconstruction
             ax = plt.subplot(6, n, i+1+2*n); plt.yticks([])
-            plt.imshow(decoded_imgs[i]) # .reshape(img_dim, img_dim)
+            plt.imshow(decoded_imgs[i], vmin=decoded_imgs.min(), vmax=decoded_imgs.max()) # .reshape(img_dim, img_dim)
             plt.gray()
             ax.get_xaxis().set_visible(False)
             #ax.get_yaxis().set_visible(False)
@@ -465,8 +465,8 @@ if __name__ == "__main__":
 
             # display dreamed latent space
             ax = plt.subplot(6, n, i+1+4*n); plt.yticks([])
-            plt.imshow(latent_dreams[i].reshape(lat_h, lat_w, lat_ch) if lat_ch == 3 else encoded_imgs[i].reshape(lat_h, lat_w), 
-                vmin=encoded_imgs.min(), vmax=encoded_imgs.max(), interpolation='nearest')
+            plt.imshow(latent_dreams[i].reshape(lat_h, lat_w, lat_ch) if lat_ch == 3 else latent_dreams[i].reshape(lat_h, lat_w), 
+                vmin=latent_dreams.min(), vmax=latent_dreams.max(), interpolation='nearest')
             plt.gray()
             ax.get_xaxis().set_visible(False)
             #ax.get_yaxis().set_visible(False)
@@ -479,7 +479,7 @@ if __name__ == "__main__":
             
             # display dreamed images 
             ax = plt.subplot(6, n, i+1+5*n); plt.yticks([])
-            plt.imshow(dreams[i])
+            plt.imshow(dreams[i], vmin=dreams.min(), vmax=dreams.max())
             plt.gray()
             ax.get_xaxis().set_visible(False)
             #ax.get_yaxis().set_visible(False)
