@@ -311,6 +311,12 @@ if __name__ == "__main__":
         dreams = decoder.predict(latent_dreams) # dream the images
 
         print("decoded images shape: ", decoded_imgs.shape)
+        import os
+        import matplotlib as mpl
+        if os.environ.get('DISPLAY','') == '':
+            print('No display found. Using non-interactive Agg backend')
+            mpl.use('Agg')
+
         import matplotlib.pyplot as plt
 
         # TODO: evaluate the reconstructed images

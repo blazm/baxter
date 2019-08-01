@@ -21,13 +21,13 @@ if __name__ == "__main__":
     #generator_modes = ["sub-mean-noisy", "sub-mean", "noisy", "default"]
 
     # TODO: run experiments
-    latent_dims = [4, 16, 64] 
+    latent_dims = [16, 64]  # [4, 
     # latent sizes map directly to number of conv layers for AE_conv 
-    conv_layers = [5, 4, 3]
+    conv_layers = [4, 3] # [5, 
     #obj_weights = [0.1, 0.2, 0.5, 0.8, 0.9, 1.0] # back_weight = 1.0 - obj_weight, loss=wmse, opt=adamw
-    obj_weights = [0.33, 0.5, 0.67, 0.8, 0.94, 0.98] # as suggested by Abraham
+    obj_weights = [0.33, 0.67, 0.8, 0.98] # as suggested by Abraham # 0.94, 0.5, 
     models = ['ae_conv', 'vaewm']
-    obj_sizes = [1.0, 2.0, 3.0, 4.0]
+    obj_sizes = [1.0, 2.0, 3.0] #, 4.0]
     # 64x64x3 - VAE is fixed to this image size
     
     obj_weights.reverse()
@@ -67,10 +67,13 @@ if __name__ == "__main__":
                         # run training for this exact configuration
                         # DONE: save parameter configuration to enable experiment reproduction (in train.py)
                         #system("python train_ae.py") # TODO: change this to be compatible with Linux as well -- system("source activate tf35;python train_ae.py")
-                        #if platform.system() == 'Windows':
-                        subprocess.check_output('python train_ae.py', shell=True) 
-                        #else:
-                        #    system("source activate python35;python train_ae.py")
+                        if platform.system() == 'Windows':
+                            subprocess.check_output('python train_ae.py', shell=True) 
+                        elif platform.system() == 'Linux':
+                            system("source activate python35;python train_ae.py")
+                        else:
+                            print("OS not recognized. Exiting.")
+                            exit()
                         # results will be saved as: trained models, tensorboard logs, pdf, csv, ini
 
     # once trained, we can test all the models

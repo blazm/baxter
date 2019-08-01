@@ -21,9 +21,13 @@ from keras.utils import plot_model
 from keras import backend as K
 
 import numpy as np
+import os
+import matplotlib as mpl
+if os.environ.get('DISPLAY','') == '':
+    print('No display found. Using non-interactive Agg backend')
+    mpl.use('Agg')
 import matplotlib.pyplot as plt
 import argparse
-import os
 
 from AdamW import AdamW
 from utils import psnr, load_parameters
