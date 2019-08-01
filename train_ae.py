@@ -91,6 +91,7 @@ if __name__ == "__main__":
     test_dir = eval(parameters["dataset"]["test_dir"])
     img_shape = eval(parameters["dataset"]["img_shape"])
 
+    total_images = int(parameters["synthetic"]["total_images"])
     size_factor = float(parameters["synthetic"]["size_factor"])
     obj_attention = float(parameters["synthetic"]["obj_attention"])
     back_attention = float(parameters["synthetic"]["back_attention"])
@@ -178,17 +179,17 @@ if __name__ == "__main__":
     from shutil import copy2 as copyfile
     copyfile('config.ini', 'snapshots/{}.ini'.format(experiment_label))
 
-    if train_dir is None:
-        x_train, x_test = load_data()
-        total_images = x_train.shape[0]
+    #if train_dir is None:
+    #    x_train, x_test = load_data()
+    #    total_images = x_train.shape[0]
    
     if do_train:
         from keras.callbacks import TensorBoard, CSVLogger, LearningRateScheduler
 
         if train_dir is not None:
-            train_images = list_images_recursively(train_dir)
-            total_images = len(train_images)
-            print("Total train images: ", total_images, train_images[0])
+            #train_images = list_images_recursively(train_dir)
+            #total_images = len(train_images)
+            print("Total train images: ", total_images)
             #fitting_generator = data_generator(train_dir, train_images, img_shape=img_shape,  batch_size=batch_size)
 
             fitting_generator = random_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, batch_size=batch_size)
@@ -217,10 +218,10 @@ if __name__ == "__main__":
         lrate = LearningRateScheduler(exp_decay)
         from train_vae import warmup
         from keras.callbacks import LambdaCallback
-        wu_cb = LambdaCallback(on_epoch_end=lambda epoch, log: warmup(epoch))
+        #wu_cb = LambdaCallback(on_epoch_end=lambda epoch, log: warmup(epoch))
 
-        callbacks=[wu_cb, tb, csv] #  lrate, 
-        steps = 5000 // batch_size #np.ceil(total_images // batch_size)
+        callbacks=[tb, csv] #  lrate, wu_cb, 
+        steps = total_images // batch_size
         
         history = autoencoder.fit_generator(fitting_generator, steps_per_epoch=steps, epochs=num_epochs, verbose=1, 
             callbacks=callbacks, validation_data=valid_generator, validation_steps=5)
@@ -261,7 +262,7 @@ if __name__ == "__main__":
                 input("Press any key...")
 
             #valid_generator = data_generator(valid_dir, valid_images, img_shape=img_shape,  batch_size=batch_size, mode=generator_mode)
-            valid_generator = random_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, batch_size=64, resized_objects=resized_objects)
+            valid_generator = random_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, batch_size=batch_size, resized_objects=resized_objects)
             #valid_generator = data_generator(test_dir, test_images, img_shape=img_shape, batch_size=1, mode=generator_mode)
             h,w,ch = img_shape
             x_test = np.zeros((len(test_images), h, w, ch))
@@ -278,7 +279,7 @@ if __name__ == "__main__":
                     break
 
             # TODO: test if this returns median image n x n x 3
-            back_generator = random_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, batch_size=64)
+            back_generator = random_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, batch_size=batch_size)
             [batch_inputs, batch_masks], batch_outputs = next(back_generator)
             background = np.median(batch_outputs, axis=0, keepdims=False)
             print("median image shape: ", background.shape) 
@@ -406,8 +407,8 @@ if __name__ == "__main__":
         #print("avg. IoU: ", IoUs.mean(), " - ", IoUs.std(), "avg min(R,B): ", minRBs.mean(), " - ", minRBs.std())
         np.savetxt('snapshots/{}.eval'.format(experiment_label), [IoUs.mean(), IoUs.std(), minRBs.mean(), minRBs.std()], delimiter=",", fmt='%1.5f', newline=' ')
 
-        n = 20
-        fig = plt.figure(figsize=(200//4, 70//4)) # 20,4 if 10 imgs
+        n = batch_size
+        fig = plt.figure(figsize=(int(n * 2.5), int(n * 0.5))) # 20,4 if 10 imgs
         for i in range(n):
             # display original
             ax = plt.subplot(6, n, i+1); plt.yticks([])
@@ -424,7 +425,7 @@ if __name__ == "__main__":
             # display encoded - vmin and vmax are needed for scaling (otherwise single pixels are drawn as black)
             ax = plt.subplot(6, n, i+1+n); plt.yticks([])
             plt.imshow(encoded_imgs[i].reshape(lat_h, lat_w, lat_ch) if lat_ch == 3 else encoded_imgs[i].reshape(lat_h, lat_w), 
-                vmin=encoded_imgs.min(), vmax=encoded_imgs.max())
+                vmin=encoded_imgs.min(), vmax=encoded_imgs.max(), interpolation='nearest')
             plt.gray()
             ax.get_xaxis().set_visible(False)
             #ax.get_yaxis().set_visible(False)
@@ -457,7 +458,7 @@ if __name__ == "__main__":
             #ax.get_yaxis().set_visible(False)
 
             if i == 0:
-                ax.set_ylabel("front mask", rotation=90, size='xx-large')
+                ax.set_ylabel("eval. mask", rotation=90, size='xx-large')
                 ax.set_yticklabels([])  
             else:
                 ax.get_yaxis().set_visible(False)
@@ -465,7 +466,7 @@ if __name__ == "__main__":
             # display dreamed latent space
             ax = plt.subplot(6, n, i+1+4*n); plt.yticks([])
             plt.imshow(latent_dreams[i].reshape(lat_h, lat_w, lat_ch) if lat_ch == 3 else encoded_imgs[i].reshape(lat_h, lat_w), 
-                vmin=encoded_imgs.min(), vmax=encoded_imgs.max())
+                vmin=encoded_imgs.min(), vmax=encoded_imgs.max(), interpolation='nearest')
             plt.gray()
             ax.get_xaxis().set_visible(False)
             #ax.get_yaxis().set_visible(False)

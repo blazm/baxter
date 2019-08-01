@@ -38,7 +38,7 @@ from test_loss import median_mse_wrapper, masked_mse_wrapper, masked_binary_cros
 beta = K.variable(value=0.0)
 def warmup(epoch):
     value = (epoch/10.0) * (epoch <= 10.0) + 1.0 * (epoch > 10.0)
-    print("\nbeta:", value)
+    #print("\nbeta:", value)
     K.set_value(beta, value)
 
 # reparameterization trick
