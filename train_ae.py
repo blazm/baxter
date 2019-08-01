@@ -336,8 +336,17 @@ if __name__ == "__main__":
         robot1 = np.ones((h, w, ch)) * avg_robot1
         robot2 = np.ones((h, w, ch)) * avg_robot2
 
+        def mse(A, B):
+            return ((A - B)**2).mean(axis=None) # None == scalar value
+
+        def rmse(A, B):
+            return np.sqrt(mse(A, B))
+
         IoUs = np.zeros((len(test_images)))
         minRBs = np.zeros((len(test_images)))
+        mseRs = np.zeros((len(test_images)))
+        mseBs = np.zeros((len(test_images)))
+
         for i in range(x_test.shape[0]):
             original = x_test[i]
             mask = x_mask[i]#.astype(int)
@@ -392,6 +401,9 @@ if __name__ == "__main__":
             IoUs[i] = IoU
             minRBs[i] = minRB
 
+            mseRs[i] = mse(juan_mask * original, juan_mask * reconstructed)
+            mseBs[i] = mse(zero_mask * original, zero_mask * reconstructed)
+
             #print(class_masks_B[i].shape, class_masks_B[i].max(), class_masks_B[i].min())
             label = str(np.random.randint(0, 1000))
             
@@ -405,7 +417,12 @@ if __name__ == "__main__":
             #if i > 5:
             #    exit()
         #print("avg. IoU: ", IoUs.mean(), " - ", IoUs.std(), "avg min(R,B): ", minRBs.mean(), " - ", minRBs.std())
-        np.savetxt('snapshots/{}.eval'.format(experiment_label), [IoUs.mean(), IoUs.std(), minRBs.mean(), minRBs.std()], delimiter=",", fmt='%1.5f', newline=' ')
+        np.savetxt('snapshots/{}.eval'.format(experiment_label), 
+            [mseRs.mean(), mseRs.std(),
+            mseBs.mean(), mseBs.std(),   
+            IoUs.mean(), IoUs.std(), 
+            minRBs.mean(), minRBs.std()],
+             delimiter=",", fmt='%1.5f', newline=' ')
 
         n = batch_size
         fig = plt.figure(figsize=(int(n * 2.5), int(n * 0.5))) # 20,4 if 10 imgs

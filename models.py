@@ -12,6 +12,7 @@ import tensorflow as tf
 # instantiate regularizer
 #reg = l1(0.001)
 
+from test_loss import mse, rmse
 from utils import psnr, load_parameters
 from dssim import DSSIMObjective
 
@@ -141,7 +142,7 @@ def build_conv_only_ae(img_shape=(32, 32, 3), latent_size=16, opt='adam', loss='
     if loss == 'wmse':
         loss = masked_mse_wrapper(input_mask)
 
-    autoencoder.compile(optimizer=opt, loss=loss, metrics=[psnr])
+    autoencoder.compile(optimizer=opt, loss=loss, metrics=[mse, rmse, psnr])
 
     #print(autoencoder.summary())
     #input("Press any key...")
@@ -301,7 +302,7 @@ def build_conv_dense_ae(img_shape=(32, 32, 3), latent_size=16, opt='adam', loss=
         loss = DSSIMObjective()
     if loss == 'wmse':
         loss = masked_mse_wrapper(input_mask)
-    autoencoder.compile(optimizer=opt, loss=loss, metrics=[psnr])
+    autoencoder.compile(optimizer=opt, loss=loss, metrics=[mse, rmse, psnr])
 
     #print(autoencoder.summary())
     #input("Press any key...")

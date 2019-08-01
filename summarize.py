@@ -26,8 +26,10 @@ if __name__ == '__main__':
     #print(result_files)
     result_files.remove('.gitkeep')
 
-    summary = np.zeros((len(result_files), 15))
-    summary_format = '%d,%d,%1.2f,%1.2f,%1.1f,%3.2f,%2.2f,%1.6f,%1.2f,%1.6f,%1.2f,%1.5f,%1.5f,%1.5f,%1.5f'
+    summary = np.zeros((len(result_files), 19))
+    summary_format = '%d,%d,%1.2f,%1.2f,%1.1f,%3.2f,%2.2f,%1.6f,%1.2f,%1.6f,%1.2f,%1.5f,%1.5f,%1.5f,%1.5f,%1.5f,%1.5f,%1.5f,%1.5f'
+
+    print(summary.shape)
 
     for i, ex_label in enumerate(result_files):
         metrics_path = os.path.join(dir_with_results, ex_label+'.csv')
@@ -58,12 +60,13 @@ if __name__ == '__main__':
         summary[i][len(params):len(params)+last_row.shape[0]] = last_row
 
         eval_metrics = np.loadtxt('snapshots/{}.eval'.format(ex_label)) # avg-iou, std-iou, avg-minRB, std-minRB
-        summary[i][len(params)+last_row.shape[0]:] = eval_metrics
+        print(len(params)+last_row.shape[0]-4)
+        summary[i][len(params)+last_row.shape[0]-4:] = eval_metrics
         
 
     # sort by loss before saving
     ind = np.argsort( summary[:,5] )[::-1] # bigger values first
     summary = summary[ind]
     with open('summary.csv', 'w') as fi:
-        fi.write("model,latent,back-att,obj-att,obj-size,robot-ratio,loss-ratio,loss,psnr,val-loss,val-psnr,avg-iou,std-iou,avg-minRB,std-minRB\n")
+        fi.write("model,latent,back-att,obj-att,obj-size,robot-ratio,loss-ratio,loss,psnr,val-loss,val-psnr,avg-mseR,std-mseR,avg-mseB,std-mseB,avg-iou,std-iou,avg-minRB,std-minRB\n")
         np.savetxt(fi, summary, fmt=summary_format)

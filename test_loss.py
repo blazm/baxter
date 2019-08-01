@@ -6,6 +6,14 @@ from utils import preprocess_size, load_parameters, loadAndResizeImages2
 def preprocess_size_helper(new_dim=(128, 160)):
     return lambda image: preprocess_size(image, new_dim)
     
+from keras.losses import mean_squared_error
+
+def mse(y_pred, y_true):
+    return mean_squared_error(y_pred, y_true)
+
+def rmse(y_pred, y_true):
+    return K.sqrt(mse(y_pred, y_true))
+
 # example of a wrapper loss - generator must output 3 values x, [y, y_p]
 def MAEpw_wrapper(y_prec):
     def MAEpw(y_true, y_pred):

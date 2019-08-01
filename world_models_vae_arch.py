@@ -6,6 +6,8 @@ from keras.optimizers import Adam
 from keras import backend as K
 from utils import psnr
 
+from test_loss import mse, rmse
+
 INPUT_DIM = (64,64,3)
 
 CONV_FILTERS = [32,64,64, 128]
@@ -234,8 +236,8 @@ def build_vae_world_model(img_shape=(32, 32, 3), latent_size=16, opt='adam', los
     
     opti = Adam(lr=LEARNING_RATE)
     if loss == 'mse':
-        vae_full.compile(optimizer=opti, loss = vae_loss,  metrics = [psnr])
+        vae_full.compile(optimizer=opti, loss = vae_loss,  metrics = [mse, rmse, psnr])
     elif loss == 'wmse':
-        vae_full.compile(optimizer=opti, loss = vae_masked_loss_wrapper(mask_inputs),  metrics = [psnr])
+        vae_full.compile(optimizer=opti, loss = vae_masked_loss_wrapper(mask_inputs),  metrics = [mse, rmse, psnr])
     
     return (vae_full,vae_encoder, vae_encoder_mu_log_var, vae_decoder, Z_DIM)
