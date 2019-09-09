@@ -1,10 +1,11 @@
 
 # includes all keras layers for building the model
 from keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D, BatchNormalization, AveragePooling2D, GlobalAveragePooling2D
-from keras.layers import Dropout, Flatten, Reshape, Conv2DTranspose, ZeroPadding2D
+from keras.layers import Dropout, Flatten, Reshape, Conv2DTranspose, ZeroPadding2D, Concatenate
 from keras.models import Model
 from keras.optimizers import Adam
-from keras.regularizers import l1
+from keras.regularizers import l1, l2
+from keras.initializers import random_normal
 from keras import backend as K
 import tensorflow as tf
 # import regularizer
@@ -23,6 +24,89 @@ from test_loss import median_mse_wrapper, masked_mse_wrapper, masked_binary_cros
 def build_multi_ae():
     pass # TODO: multi input multi output ae
 
+def make_forward_model(latent_size, action_size=1):
+
+    kernel_regularizer = l2(l = 0.001)
+    normal = random_normal(stddev=0.1, seed=101)
+    latent_input = Input(latent_size)
+    try:
+        flat_layer = Flatten(input_shape=latent_size)
+        latent_flat = flat_layer(latent_input)
+        dense_size = flat_layer.output_shape[1] #+ action_size 
+    except ValueError: # happens with vaewm (since it is already flattened)
+        latent_flat = latent_input
+        dense_size = latent_size[0]
+
+    #latent_dense = Dense(dense_size, kernel_initializer=normal, kernel_regularizer=kernel_regularizer, 
+    #                                 bias_initializer='ones', activation='tanh')(latent_input)
+
+    action_input = Input((action_size,))
+    #action_dense = Dense(dense_size, kernel_initializer=normal, kernel_regularizer=kernel_regularizer, 
+    #                                 bias_initializer='ones', activation='tanh')(action_input)
+    
+    #action_flat = Flatten(input_shape=[action_size])(action_input)
+
+    merged = Concatenate()([latent_input, action_input])
+    #merged = Concatenate()([latent_dense, action_dense])
+    #print(flat_layer.output_shape)
+    
+    x = merged
+    x = Dense(dense_size, kernel_initializer=normal, kernel_regularizer=kernel_regularizer, bias_initializer='ones', activation='relu')(x)
+    #x = Dropout(0.2)(x)
+    x = Dense(dense_size, kernel_initializer=normal, kernel_regularizer=kernel_regularizer, bias_initializer='ones', activation='relu')(x)
+    #x = Dropout(0.2)(x)
+    x = Dense(dense_size, kernel_initializer=normal, kernel_regularizer=kernel_regularizer, bias_initializer='ones', activation='relu')(x)
+    #x = Dense(dense_size, kernel_initializer=normal, bias_initializer='ones', activation='relu')(x
+    x = Reshape(latent_size)(x) # reshape back to latent size tensor
+
+    forward_model = Model(inputs=[latent_input, action_input], outputs=x)
+
+    return forward_model
+
+def add_forward_model(autoencoder, encoder, decoder, action_size=1, train_only_forward=False):
+
+    normal = random_normal(stddev=0.1, seed=101)
+    latent_size = encoder.output_shape
+    latent_size = latent_size[1:]
+    print("latent_size: ", latent_size)
+    print("action_size: ", action_size)
+    latent_input = Input(latent_size)
+    try:
+        flat_layer = Flatten(input_shape=latent_size)
+        latent_flat = flat_layer(latent_input)
+        dense_size = flat_layer.output_shape[1] #+ action_size 
+
+    except ValueError: # happens with vaewm (since it is already flattened)
+        latent_flat = latent_input
+        dense_size = latent_size[0]
+
+    action_input = Input((action_size,))
+    #action_flat = Flatten(input_shape=[action_size])(action_input)
+
+    merged = Concatenate()([latent_flat, action_input])
+    #print(flat_layer.output_shape)
+    
+    x = merged
+    x = Dense(dense_size, kernel_initializer=normal, bias_initializer='ones', activation='relu')(x)
+    x = Dense(dense_size, kernel_initializer=normal, bias_initializer='ones', activation='relu')(x)
+    #x = Dense(dense_size, kernel_initializer=normal, bias_initializer='ones', activation='relu')(x)
+    x = Dense(dense_size, kernel_initializer=normal, bias_initializer='ones', activation='relu')(x)
+    x = Reshape(latent_size)(x) # reshape back to latent size tensor
+
+    if train_only_forward:
+        # set autoencoder as non trainable
+        for l in autoencoder.layers:
+            l.trainable = False
+        
+    forward_model = Model(inputs=[latent_input, action_input], outputs=x)
+    encoder_forward = Model(inputs=autoencoder.inputs + [action_input], outputs=forward_model(encoder.outputs + [action_input]))
+    full_model = Model(inputs=encoder_forward.inputs, outputs=decoder(encoder_forward.outputs))
+ 
+    print(full_model.inputs)
+    full_model.summary()
+    forward_model.summary()
+
+    return autoencoder, encoder, decoder, forward_model, encoder_forward, full_model
 
 def build_conv_only_ae(img_shape=(32, 32, 3), latent_size=16, opt='adam', loss='mse', conv_layers=4, initial_filters=4):
     
@@ -133,14 +217,19 @@ def build_conv_only_ae(img_shape=(32, 32, 3), latent_size=16, opt='adam', loss='
 
         opt = AdamW(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0., weight_decay=0.025, batch_size=batch_size, samples_per_epoch=1000, epochs=num_epochs)
 
-    if loss == 'wbin-xent':
+    from inspect import isfunction
+    if isfunction(loss):
+        loss = loss(input_mask)
+    elif loss == 'wbin-xent':
         loss = masked_binary_crossentropy(input_mask)
     elif loss == 'bin-xent':
         loss = 'binary_crossentropy'
-    if loss == 'dssim':
+    elif loss == 'dssim':
         loss = DSSIMObjective()
-    if loss == 'wmse':
+    elif loss == 'wmse':
         loss = masked_mse_wrapper(input_mask)
+
+
 
     autoencoder.compile(optimizer=opt, loss=loss, metrics=[mse, rmse, psnr])
 

@@ -24,12 +24,47 @@ from scipy.ndimage import imread
 from skimage.transform import resize
 
 from utils import trim, read_files, psnr, log10, preprocess_size, loadAndResizeImages2
-from models import build_conv_dense_ae, build_mnist_ae, build_conv_only_ae
+from models import build_conv_dense_ae, build_mnist_ae, build_conv_only_ae, add_forward_model
 from train_vae import build_vae
 from world_models_vae_arch import build_vae_world_model
 
-from data_generators import data_generator, data_generator_mnist, random_data_generator
+from data_generators import data_generator, data_generator_mnist, random_data_generator, brownian_data_generator
 from utils import load_parameters, list_images_recursively
+
+def prepare_optimizer_object(optimizer_string, lr=0.001):
+    # TODO: create Adam, AdamW with custom parameters if needed
+    from AdamW import AdamW
+    from keras.optimizers import Adam
+    if "adamw" in optimizer_string:
+        parameters_filepath = "config.ini"
+        parameters = load_parameters(parameters_filepath)
+        num_epochs = int(parameters["hyperparam"]["num_epochs"])
+        batch_size = int(parameters["hyperparam"]["batch_size"])
+        opt = AdamW(lr=lr, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0., weight_decay=0.025, batch_size=batch_size, samples_per_epoch=1000, epochs=num_epochs)
+        return opt
+    elif 'adam' in optimizer_string:
+        opt = Adam(lr=lr)
+        return opt
+    return optimizer_string
+
+def prepare_loss_object(loss):
+    from test_loss import median_mse_wrapper, masked_mse_wrapper, masked_binary_crossentropy
+
+    if loss == 'wbin-xent':
+        loss = masked_binary_crossentropy #(input_mask)
+    elif loss == 'bin-xent':
+        loss = 'binary_crossentropy'
+    #if loss == 'dssim':
+    #    loss = DSSIMObjective()
+    if loss == 'wmse':
+        loss = masked_mse_wrapper #(input_mask)
+    '''
+    if 'wmse' in loss_string:
+        return masked_mse_wrapper, True # this returns a lambda, which receives additional input as mask
+    elif 'ssim' in loss_string:
+        return ssim_metric, False
+    '''
+    return loss
 
 def load_data(shape=(28, 28, 1)):
     h, w, ch = shape
@@ -55,7 +90,7 @@ if __name__ == "__main__":
     
     from pathlib import Path
     # random generator config
-    dir_with_src_images = Path('data/generated/')
+    dir_with_src_images = Path('data/generated_simple/')
     base_image = 'median_image.png'
     object_images = ['circle-red.png', 'robo-green.png'] # circle in the first place, as robo can be drawn over it
 
@@ -85,6 +120,8 @@ if __name__ == "__main__":
     do_test = eval(parameters["general"]["do_test"])
     selected_gpu = eval(parameters["general"]["selected_gpu"])
     interactive = eval(parameters["general"]["interactive"])
+    include_forward_model = eval(parameters["general"]["include_forward_model"])
+    train_only_forward = eval(parameters["general"]["train_only_forward"])
 
     train_dir = eval(parameters["dataset"]["train_dir"])
     valid_dir = eval(parameters["dataset"]["valid_dir"])
@@ -118,25 +155,31 @@ if __name__ == "__main__":
             img_shape=img_shape, latent_size=latent_size, 
             opt=opt, loss=loss, #batch_size=batch_size, 
             conv_layers=conv_layers, initial_filters=num_filters) #, kernel_size=kernel_size, kernel_mult=kernel_mult)
-    # vae
-    elif 'vae' in model_label:
-        autoencoder, encoder, decoder, latent_shape = build_vae(
-            img_shape=img_shape, latent_size=latent_size, 
-            opt=opt, loss=loss, batch_size=batch_size, 
-            conv_layers=conv_layers, initial_filters=num_filters) #, kernel_size=kernel_size, kernel_mult=kernel_mult)
-    # ae
+        # vae
+        '''
+        elif 'vae' in model_label:
+            autoencoder, encoder, decoder, latent_shape = build_vae(
+                img_shape=img_shape, latent_size=latent_size, 
+                opt=opt, loss=loss, batch_size=batch_size, 
+                conv_layers=conv_layers, initial_filters=num_filters) #, kernel_size=kernel_size, kernel_mult=kernel_mult)
+        '''
+        # ae
     elif 'ae_conv' in model_label:
         autoencoder, encoder, decoder, latent_size = build_conv_only_ae(
             img_shape=img_shape, latent_size=latent_size, 
             opt=opt, loss=loss, 
             conv_layers=conv_layers, initial_filters=num_filters) #, kernel_size=kernel_size, kernel_mult=kernel_mult)
     #autoencoder, encoder, decoder, latent_size = build_mnist_ae(img_shape=img_shape, opt=opt, loss=loss)
+    '''
     elif 'ae_dense' in model_label:
         autoencoder, encoder, decoder, latent_size = build_conv_dense_ae(
             img_shape=img_shape, latent_size=latent_size, 
             opt=opt, loss=loss, 
             conv_layers=conv_layers, initial_filters=num_filters)
+    '''
+
     
+
     if interactive:
         autoencoder.summary()
         input("Press any key...")
@@ -175,6 +218,30 @@ if __name__ == "__main__":
         "{:02d}".format(latent_size) if type(latent_size) == int else 'x'.join(map(str,latent_size[1:])), 
         conv_layers, opt, loss)
 
+    if include_forward_model:
+        if train_only_forward:
+            print("Preloading weights from previous model: {}".format(experiment_label))
+            autoencoder.load_weights('trained_models/{}.h5'.format(experiment_label), by_name=True)
+        new_models = add_forward_model(autoencoder, encoder, decoder, train_only_forward=train_only_forward)
+        autoencoder, encoder, decoder, forward_model, encoder_forward, full_model = new_models
+        old_autoencoder = autoencoder
+        autoencoder = full_model
+
+                
+        from test_loss import mse, rmse
+        from utils import psnr, load_parameters
+        opt_obj = prepare_optimizer_object(opt)
+        loss_obj = prepare_loss_object(loss)
+        from inspect import isfunction
+        if isfunction(loss_obj):
+            loss_obj = loss_obj(old_autoencoder.inputs[1])
+        
+        autoencoder.compile(optimizer=opt_obj, loss=loss_obj, metrics=[mse, rmse, psnr])
+        input("Press any key...")
+        #exit()
+    else:
+        forward_model = None
+
     # copy parameters into snapshots archive
     from shutil import copy2 as copyfile
     copyfile('config.ini', 'snapshots/{}.ini'.format(experiment_label))
@@ -186,26 +253,27 @@ if __name__ == "__main__":
     if do_train:
         from keras.callbacks import TensorBoard, CSVLogger, LearningRateScheduler
 
-        if train_dir is not None:
-            #train_images = list_images_recursively(train_dir)
-            #total_images = len(train_images)
-            print("Total train images: ", total_images)
-            #fitting_generator = data_generator(train_dir, train_images, img_shape=img_shape,  batch_size=batch_size)
-
+        if include_forward_model:
+            fitting_generator = brownian_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, batch_size=batch_size)
+            valid_generator = brownian_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, batch_size=batch_size)
+        else:
             fitting_generator = random_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, batch_size=batch_size)
-        else: # if no data, then use mnist
-            # implement fit_generator (inside generator provide a mechanism to train online -- wait for new samples to arrive in the window)
-            fitting_generator = data_generator_mnist(x_train, x_test, (img_dim,img_dim,1), True, batch_size)
-
+            valid_generator = random_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, batch_size=batch_size)
+        
+        #if train_dir is not None:
+        #else: # if no data, then use mnist
+        #    # implement fit_generator (inside generator provide a mechanism to train online -- wait for new samples to arrive in the window)
+        #    fitting_generator = data_generator_mnist(x_train, x_test, (img_dim,img_dim,1), True, batch_size)
+        '''
         if valid_dir is not None:
             valid_images = list_images_recursively(valid_dir)
             print("Total valid images: ", len(valid_images), valid_images[0])
             if interactive:
                 input("Press any key...")
             #valid_generator = data_generator(valid_dir, valid_images, img_shape=img_shape,  batch_size=batch_size)
-            valid_generator = random_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, batch_size=batch_size)
         else: # if no data, then use mnist
             valid_generator = data_generator_mnist(x_train, x_test, (img_dim,img_dim,1), False, batch_size)
+        '''
 
         tb = TensorBoard(log_dir='tf-log/{}'.format(experiment_label))
         csv = CSVLogger('snapshots/{}.csv'.format(experiment_label), append=False, separator=',')
@@ -242,7 +310,7 @@ if __name__ == "__main__":
         #plot(history)
 
     if do_test:
-
+        batch_size = 16
         resized_objects = []
 
         autoencoder.load_weights('trained_models/{}_weights.h5'.format(experiment_label))
@@ -255,19 +323,40 @@ if __name__ == "__main__":
                 resized_dataset[i] = resize(dataset[i], (h, w), anti_aliasing=True)
             return resized_dataset
 
-        if test_dir is not None:
+        if include_forward_model:
+            valid_generator = brownian_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, batch_size=batch_size, resized_objects=resized_objects)
+            
+            h,w,ch = img_shape
+            x_test = np.zeros((batch_size, h, w, ch))
+            x_mask = np.zeros((batch_size, h, w, ch))
+            x_action = np.zeros((batch_size, 1))
+
+            i = 0
+            for [img, mask, action], out in valid_generator:
+                
+                x_test[i] = img[0] #resize(img, (h, w), anti_aliasing=True)
+                #print(mask[0].shape, mask[0].min(), mask[0].max())
+                x_mask[i] = mask[0]
+                x_action[i] = action[0]
+                i += 1
+                if i >= batch_size:
+                    break
+
+
+            back_generator = brownian_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, batch_size=batch_size)
+            [batch_inputs, batch_masks, batch_actions], batch_outputs = next(back_generator)
+            background = np.median(batch_outputs, axis=0, keepdims=False)
+        else:
+            '''
             test_images = list_images_recursively(valid_dir)
             print("Total valid images: ", len(test_images), test_images[0])
-            if interactive:
-                input("Press any key...")
-
+            '''
             #valid_generator = data_generator(valid_dir, valid_images, img_shape=img_shape,  batch_size=batch_size, mode=generator_mode)
             valid_generator = random_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, batch_size=batch_size, resized_objects=resized_objects)
             #valid_generator = data_generator(test_dir, test_images, img_shape=img_shape, batch_size=1, mode=generator_mode)
             h,w,ch = img_shape
-            x_test = np.zeros((len(test_images), h, w, ch))
-            
-            x_mask = np.zeros((len(test_images), h, w, ch))
+            x_test = np.zeros((batch_size, h, w, ch))
+            x_mask = np.zeros((batch_size, h, w, ch))
             i = 0
             for [img, mask], out in valid_generator:
                 
@@ -275,7 +364,7 @@ if __name__ == "__main__":
                 #print(mask[0].shape, mask[0].min(), mask[0].max())
                 x_mask[i] = mask[0]
                 i += 1
-                if i >= len(test_images):
+                if i >= batch_size:
                     break
 
             # TODO: test if this returns median image n x n x 3
@@ -283,17 +372,21 @@ if __name__ == "__main__":
             [batch_inputs, batch_masks], batch_outputs = next(back_generator)
             background = np.median(batch_outputs, axis=0, keepdims=False)
             print("median image shape: ", background.shape) 
-            #exit()
-        else: # if no data, then use mnist
+            
+            '''
+            # if no data, then use mnist
             #valid_generator = data_generator_mnist(x_train, x_test, (img_dim,img_dim,1), False, batch_size)
             x_test = resize_dataset(x_test)
             background = np.median(x_test, axis=0, keepdims=True)
             x_mask = x_test - background
             background = background[0]
-
+            '''
         #decoded_imgs = autoencoder.predict(x_test)
         print("input images shape: ", x_test.shape)
         encoded_imgs = encoder.predict(x_test)
+
+        if include_forward_model:
+            encoded_imgs = forward_model.predict([encoded_imgs, x_action])
         if type(encoded_imgs) == list:
             encoded_imgs = encoded_imgs[-1]
         print("encoded images shape: ", encoded_imgs.shape) #, encoded_imgs[1].shape, encoded_imgs[2].shape)
@@ -309,6 +402,9 @@ if __name__ == "__main__":
         print("input images shape: ", x_test.shape)
         print("decoded_imgs images shape: ", decoded_imgs.shape)
         latent_dreams = encoder.predict(decoded_imgs)
+        if include_forward_model:
+            latent_dreams = forward_model.predict([latent_dreams, x_action])
+        
         dreams = decoder.predict(latent_dreams) # dream the images
 
         print("decoded images shape: ", decoded_imgs.shape)
@@ -322,10 +418,10 @@ if __name__ == "__main__":
 
         # TODO: evaluate the reconstructed images
         from data_generators import cdist, max_cdist
-        
+
         threshold = .2
-        class_masks_R = np.zeros((len(test_images), h, w, ch))
-        class_masks_B = np.zeros((len(test_images), h, w, ch))
+        class_masks_R = np.zeros((batch_size, h, w, ch))
+        class_masks_B = np.zeros((batch_size, h, w, ch))
         
         print("resized objects: ", resized_objects[0].shape)
         avg_robot1 = resized_objects[0][:,:,:3].mean(axis=(0,1))
@@ -342,10 +438,10 @@ if __name__ == "__main__":
         def rmse(A, B):
             return np.sqrt(mse(A, B))
 
-        IoUs = np.zeros((len(test_images)))
-        minRBs = np.zeros((len(test_images)))
-        mseRs = np.zeros((len(test_images)))
-        mseBs = np.zeros((len(test_images)))
+        IoUs = np.zeros(batch_size)
+        minRBs = np.zeros(batch_size)
+        mseRs = np.zeros(batch_size)
+        mseBs = np.zeros(batch_size)
 
         for i in range(x_test.shape[0]):
             original = x_test[i]

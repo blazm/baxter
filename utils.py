@@ -195,3 +195,9 @@ def loadAndResizeImages2(path, names=[], preprocessors=[], load_alpha=False):
 def preprocess_size(image, new_dim=(5,4)):
     image = trim(image, new_dim, trim=0, top=0)
     return image
+
+'''
+def is_lambda(v):
+    LAMBDA = lambda:0
+    return isinstance(v, type(LAMBDA)) and v.__name__ == LAMBDA.__name__
+'''

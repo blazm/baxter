@@ -240,4 +240,4 @@ def build_vae_world_model(img_shape=(32, 32, 3), latent_size=16, opt='adam', los
     elif loss == 'wmse':
         vae_full.compile(optimizer=opti, loss = vae_masked_loss_wrapper(mask_inputs),  metrics = [mse, rmse, psnr])
     
-    return (vae_full,vae_encoder, vae_encoder_mu_log_var, vae_decoder, Z_DIM)
+    return (vae_full, vae_encoder, vae_encoder_mu_log_var, vae_decoder, Z_DIM)
