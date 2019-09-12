@@ -37,6 +37,17 @@ seed(6)
 from tensorflow import set_random_seed
 set_random_seed(6)
 
+def resize_images(images, dims=(8, 8, 3)):
+    #print("imgm ax: ", images.max())
+    resized = np.zeros((len(images), dims[0], dims[1], 1), dtype=float)
+    for i in range(len(images)):
+        tmp = imresize(images[i], size=(dims[0], dims[1]), interp='nearest') / 255.0
+    #    imsave('tmp/test_{}.png'.format(i), tmp)
+        resized[i][:, :, 0] = (tmp[:, :, 0]).astype(float)
+    #exit()
+    #print("imgm ax: ", resized.max(), resized.min())
+    return resized
+
 if __name__ == "__main__":
     
     from pathlib import Path
@@ -91,6 +102,9 @@ if __name__ == "__main__":
     num_filters = int(parameters["hyperparam"]["num_filters"])
     kernel_size = int(parameters["hyperparam"]["kernel_size"])
     kernel_mult = int(parameters["hyperparam"]["kernel_mult"])
+    residual_forward = eval(parameters["hyperparam"]["residual_forward"])
+    train_without_ae = eval(parameters["hyperparam"]["train_without_ae"])
+
     loss = (parameters["hyperparam"]["loss"])
     opt = (parameters["hyperparam"]["opt"])
     model_label = (parameters["hyperparam"]["model_label"])
@@ -103,15 +117,15 @@ if __name__ == "__main__":
     # # load best models that we have
     '''
     # best AE
-    model_label = 'ae_conv'
-    latent_size = 16
-    conv_layers = 4
-    '''
-    # best VAE
-    model_label = 'vaewm'
+    model_label = 'simple_ae_conv'
     latent_size = 64
     conv_layers = 3
-    # '''
+    '''
+    # best VAE
+    model_label = 'simple_vaewm'
+    latent_size = 64
+    conv_layers = 3
+    #'''
 
     back_attention = 0.2
     obj_attention = 0.8
@@ -170,7 +184,7 @@ if __name__ == "__main__":
             lat_w = int(latent_size // (lat_h*lat_ch))
 
 
-    forward_model = make_forward_model([latent_size], latent_size)
+    forward_model = make_forward_model([latent_size], latent_size, learn_only_difference=residual_forward)
     forward_model.compile(loss='mse', optimizer=prepare_optimizer_object('adam', 0.001), metrics=['mse'])
 
     forward_model.summary()
@@ -199,12 +213,27 @@ if __name__ == "__main__":
                     print("over the iteration limit, stopping")
                     break
 
-                latent = encoder.predict(batch_inputs)
+                if not train_without_ae:
+                    latent = encoder.predict(batch_inputs)
+                else:
+                    latent = resize_images(batch_inputs)
+
                 if len(latent.shape) > 2:
                     bs, h, w, ch = latent.shape
                     latent = np.reshape(latent, (bs, h*w*ch))
+                #latent = (latent - np.min(latent))/np.ptp(latent)
                 latent_t = latent[0:batch_size]
-                latent_t_plus_1 = latent[1:1+batch_size]
+
+                if not residual_forward:
+                    latent_t_plus_1 = latent[1:1+batch_size]
+                else:
+                    latent_t_plus_1 = ((latent[1:1+batch_size] - latent_t) + 1.0) / 2.0 # already normalized
+                
+                #print("t+1: ", latent[1:1+batch_size].min(), " ", latent[1:1+batch_size].max())
+                #print("t: ", latent_t.min(), " ", latent_t.max())
+                #print("diff: ", (latent[1:1+batch_size] - latent_t).min(), " ", (latent[1:1+batch_size] - latent_t).max())
+                #exit()
+
                 batch_actions = batch_actions[1:1+batch_size]
                 #print(batch_actions.shape)
                 batch_actions = np.repeat(batch_actions, latent_size, axis=1) # balance the actions with latent_size
@@ -217,12 +246,21 @@ if __name__ == "__main__":
                 result = forward_model.train_on_batch([latent_t, batch_actions], latent_t_plus_1)
                 
                 ([batch_inputs, batch_masks, batch_actions], batch_outputs) = val
-                latent = encoder.predict(batch_inputs)
+
+                if not train_without_ae:
+                    latent = encoder.predict(batch_inputs)
+                else:
+                    latent = resize_images(batch_inputs)
+
                 if len(latent.shape) > 2:
                     bs, h, w, ch = latent.shape
                     latent = np.reshape(latent, (bs, h*w*ch))
+                #latent = (latent - np.min(latent))/np.ptp(latent)
                 latent_t = latent[0:batch_size]
-                latent_t_plus_1 = latent[1:1+batch_size]
+                if not residual_forward:
+                    latent_t_plus_1 = latent[1:1+batch_size]
+                else:
+                    latent_t_plus_1 = ((latent[1:1+batch_size] - latent_t) + 1.0) / 2.0
                 batch_actions = batch_actions[1:1+batch_size]
 
                 batch_actions = np.repeat(batch_actions, latent_size, axis=1)
@@ -284,14 +322,26 @@ if __name__ == "__main__":
         
         #decoded_imgs = autoencoder.predict(x_test)
         print("input images shape: ", x_test.shape)
-        encoded_imgs = encoder.predict(x_test)
+        #encoded_imgs = encoder.predict(x_test)
 
+        if not train_without_ae:
+            encoded_imgs = encoder.predict(x_test)
+        else:
+            encoded_imgs = resize_images(x_test)
+        
         if len(encoded_imgs.shape) > 2:
             bs, h, w, ch = encoded_imgs.shape
             tmp = np.reshape(encoded_imgs, (bs, h*w*ch))
             encoded_imgs_t_plus_1 = forward_model.predict([tmp, x_action])
+            if residual_forward:
+                print("predicting residual forward...")
+                encoded_imgs_t_plus_1 = tmp + ((encoded_imgs_t_plus_1*2) - 1)
         else:
             encoded_imgs_t_plus_1 = forward_model.predict([encoded_imgs, x_action])
+            if residual_forward:
+                print("predicting residual forward...")
+                encoded_imgs_t_plus_1 = encoded_imgs + ((encoded_imgs_t_plus_1*2) - 1)
+
         if type(encoded_imgs_t_plus_1) == list:
             encoded_imgs_t_plus_1 = encoded_imgs_t_plus_1[-1]
 
@@ -301,13 +351,24 @@ if __name__ == "__main__":
         # normalize before displaying
         #encoded_imgs = (encoded_imgs - encoded_imgs.min()) / np.ptp(encoded_imgs) * 255.0
         #print(encoded_imgs)
-        decoded_imgs = decoder.predict(encoded_imgs)
-        if len(encoded_imgs.shape) > 2:
-            bs, h, w, ch = encoded_imgs.shape
-            tmp = np.reshape(encoded_imgs_t_plus_1, (bs, h, w, ch))
-            decoded_imgs_t_plus_1 = decoder.predict(tmp)
+        #decoded_imgs = decoder.predict(encoded_imgs)
+        if not train_without_ae:
+            decoded_imgs = decoder.predict(encoded_imgs)
         else:
-            decoded_imgs_t_plus_1 = decoder.predict(encoded_imgs_t_plus_1)
+            decoded_imgs = x_test
+            decoded_imgs_t_plus_1 = np.zeros(decoded_imgs.shape)
+            decoded_imgs_t_plus_1[0:-1] = x_test[1:]
+            decoded_imgs_t_plus_1[-1] = x_test[0]
+            #print(len(x_test), len(decoded_imgs), len(decoded_imgs_t_plus_1))
+            #exit()
+
+        if not train_without_ae:
+            if len(encoded_imgs.shape) > 2:
+                bs, h, w, ch = encoded_imgs.shape
+                tmp = np.reshape(encoded_imgs_t_plus_1, (bs, h, w, ch))
+                decoded_imgs_t_plus_1 = decoder.predict(tmp)
+            else:
+                decoded_imgs_t_plus_1 = decoder.predict(encoded_imgs_t_plus_1)
         print(decoded_imgs.shape)
         print(decoded_imgs_t_plus_1.shape)
         print("h, w, ch: {},{},{}".format(lat_h, lat_w, lat_ch))
@@ -337,7 +398,11 @@ if __name__ == "__main__":
             plt.imshow(x_test[i]) #.reshape(img_dim, img_dim)
             plt.gray()
             ax.get_xaxis().set_visible(True)
-            ax.set_xlabel("dx:{:1.2f} dy:{:1.2f}".format(x_action[i][0], x_action[i][-1]), rotation=0, size='x-large')
+            if len(x_action[i]) > 1:
+                ax.set_xlabel("dx:{:1.2f} dy:{:1.2f}".format(x_action[i][0], x_action[i][-1]), rotation=0, size='x-large')
+            else:
+                ax.set_xlabel("ac:{:1.2f}".format(x_action[i][0]), rotation=0, size='x-large')
+                
             ax.set_xticklabels([])  
             
             if i == 0:
@@ -351,7 +416,8 @@ if __name__ == "__main__":
             plt.imshow(encoded_imgs[i].reshape(lat_h, lat_w, lat_ch) if lat_ch == 3 else encoded_imgs[i].reshape(lat_h, lat_w), 
                 vmin=encoded_imgs.min(), vmax=encoded_imgs.max(), interpolation='nearest')
             plt.gray()
-            ax.get_xaxis().set_visible(False)
+            ax.get_xaxis().set_visible(True)
+            ax.set_xlabel("min:{:1.2f} max:{:1.2f}".format(encoded_imgs[i].min(), encoded_imgs[i].max()), rotation=0, size='x-large')
             #ax.get_yaxis().set_visible(False)
 
             if i == 0:
@@ -379,7 +445,8 @@ if __name__ == "__main__":
             plt.imshow(encoded_imgs_t_plus_1[i].reshape(lat_h, lat_w, lat_ch) if lat_ch == 3 else encoded_imgs_t_plus_1[i].reshape(lat_h, lat_w), 
                 vmin=encoded_imgs.min(), vmax=encoded_imgs.max(), interpolation='nearest')
             plt.gray()
-            ax.get_xaxis().set_visible(False)
+            ax.get_xaxis().set_visible(True)
+            ax.set_xlabel("min:{:1.2f} max:{:1.2f}".format(encoded_imgs_t_plus_1[i].min(), encoded_imgs_t_plus_1[i].max()), rotation=0, size='x-large')
             #ax.get_yaxis().set_visible(False)
 
             if i == 0:

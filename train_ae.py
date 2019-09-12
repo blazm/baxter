@@ -289,7 +289,7 @@ if __name__ == "__main__":
         #wu_cb = LambdaCallback(on_epoch_end=lambda epoch, log: warmup(epoch))
 
         callbacks=[tb, csv] #  lrate, wu_cb, 
-        steps = total_images // batch_size
+        steps = 5000 // batch_size
         
         history = autoencoder.fit_generator(fitting_generator, steps_per_epoch=steps, epochs=num_epochs, verbose=1, 
             callbacks=callbacks, validation_data=valid_generator, validation_steps=5)

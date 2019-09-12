@@ -1,7 +1,7 @@
 
 # includes all keras layers for building the model
 from keras.layers import Input, Dense, Conv2D, MaxPooling2D, UpSampling2D, BatchNormalization, AveragePooling2D, GlobalAveragePooling2D
-from keras.layers import Dropout, Flatten, Reshape, Conv2DTranspose, ZeroPadding2D, Concatenate
+from keras.layers import Dropout, Flatten, Reshape, Conv2DTranspose, ZeroPadding2D, Concatenate, Add, Multiply, Subtract, Lambda
 from keras.models import Model
 from keras.optimizers import Adam
 from keras.regularizers import l1, l2
@@ -24,9 +24,9 @@ from test_loss import median_mse_wrapper, masked_mse_wrapper, masked_binary_cros
 def build_multi_ae():
     pass # TODO: multi input multi output ae
 
-def make_forward_model(latent_size, action_size=1):
+def make_forward_model(latent_size, action_size=1, learn_only_difference=False):
 
-    kernel_regularizer = l2(l = 0.001)
+    kernel_regularizer = None #l2(l = 0.001)
     normal = random_normal(stddev=0.1, seed=101)
     latent_input = Input(latent_size)
     try:
@@ -46,7 +46,7 @@ def make_forward_model(latent_size, action_size=1):
     
     #action_flat = Flatten(input_shape=[action_size])(action_input)
 
-    merged = Concatenate()([latent_input, action_input])
+    merged = Concatenate(name='conc')([latent_input, action_input])
     #merged = Concatenate()([latent_dense, action_dense])
     #print(flat_layer.output_shape)
     
@@ -54,11 +54,25 @@ def make_forward_model(latent_size, action_size=1):
     x = Dense(dense_size, kernel_initializer=normal, kernel_regularizer=kernel_regularizer, bias_initializer='ones', activation='relu')(x)
     #x = Dropout(0.2)(x)
     x = Dense(dense_size, kernel_initializer=normal, kernel_regularizer=kernel_regularizer, bias_initializer='ones', activation='relu')(x)
-    #x = Dropout(0.2)(x)
     x = Dense(dense_size, kernel_initializer=normal, kernel_regularizer=kernel_regularizer, bias_initializer='ones', activation='relu')(x)
+    x = Dense(dense_size, kernel_initializer=normal, kernel_regularizer=kernel_regularizer, bias_initializer='ones', activation='relu')(x)
+    x = Dense(dense_size, kernel_initializer=normal, kernel_regularizer=kernel_regularizer, bias_initializer='ones', activation='sigmoid')(x)
+    #x = Dropout(0.2)(x)
+    #if learn_only_difference:
+        #x = Dense(dense_size, kernel_initializer=normal, kernel_regularizer=kernel_regularizer, bias_initializer='ones', activation='sigmoid')(x)
+        #x = Subtract(name='subt')([latent_flat, x])
+        #x = Add(name='add')([latent_flat, x])
+        #lmbda = Lambda(lambda inputs: inputs + 1.0 / 2.0,
+        #                output_shape=lambda shapes: shapes)
+        #x = lmbda(x)
+       
+    #else:
+    #    x = Dense(dense_size, kernel_initializer=normal, kernel_regularizer=kernel_regularizer, bias_initializer='ones', activation='sigmoid')(x)
+    
     #x = Dense(dense_size, kernel_initializer=normal, bias_initializer='ones', activation='relu')(x
     x = Reshape(latent_size)(x) # reshape back to latent size tensor
-
+    
+    
     forward_model = Model(inputs=[latent_input, action_input], outputs=x)
 
     return forward_model
@@ -130,7 +144,7 @@ def build_conv_only_ae(img_shape=(32, 32, 3), latent_size=16, opt='adam', loss='
         x = conv_lyr(x)
         conv_lyr = Conv2D(filters=filters,
                 kernel_size=kernel_size,
-                activation='elu',
+                activation='elu' if i < conv_layers-1 else 'sigmoid', # to generate latent space in between 0 and 1
                 strides=2,
                 padding='same', kernel_initializer='glorot_normal', bias_initializer='zeros')
         x = conv_lyr(x)
@@ -193,10 +207,10 @@ def build_conv_only_ae(img_shape=(32, 32, 3), latent_size=16, opt='adam', loss='
         #x = BatchNormalization()(x)
         #x = UpSampling2D((2,2))(x)
         #filters //= 2
-        
+    
     decoded_layer = Conv2D(ch, kernel_size, 
-            activation='linear' if not 'bin-xent' in loss else 'sigmoid', padding='same'
-            , kernel_initializer='glorot_normal', bias_initializer='zeros')
+            activation='sigmoid', #'linear' if not 'bin-xent' in loss else 'sigmoid', 
+            padding='same', kernel_initializer='glorot_normal', bias_initializer='zeros')
     decoded = decoded_layer(x)
 
     if loss == 'wmse' or loss == 'wbin-xent':

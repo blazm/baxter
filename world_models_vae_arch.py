@@ -30,8 +30,19 @@ KL_TOLERANCE = 0.5
 
 def sampling(args):
     z_mean, z_sigma = args
-    epsilon = K.random_normal(shape=K.shape(z_sigma), mean=0.,stddev=1.)
-    return z_mean + z_sigma * epsilon
+    epsilon = K.random_normal(shape=K.shape(z_sigma), mean=0.,stddev=0.33) # originally stddev=1., but this creates values in between -3, 3
+    result = z_mean + z_sigma * epsilon
+
+    # normalize output of sampling
+    #mean = K.mean(result, axis=-1, keepdims=True)
+    #std = K.std(result, axis=-1, keepdims=True)
+    #norm_result = ((result - mean) / (std + 0.001))
+
+    minn = K.min(result, axis=-1, keepdims=True)
+    maxx = K.max(result, axis=-1, keepdims=True)
+    norm_result = ((result - minn) / (maxx - minn))
+
+    return norm_result #z_mean + z_sigma * epsilon
 
 def convert_to_sigma(z_log_var):
     return K.exp(z_log_var / 2)
@@ -58,8 +69,8 @@ class VAE():
 
         vae_z_in = Flatten()(vae_c4)
 
-        vae_z_mean = Dense(Z_DIM, name='mu')(vae_z_in)
-        vae_z_log_var = Dense(Z_DIM, name='log_var')(vae_z_in)
+        vae_z_mean = Dense(Z_DIM, name='mu', activation='sigmoid')(vae_z_in)
+        vae_z_log_var = Dense(Z_DIM, name='log_var', activation='sigmoid')(vae_z_in)
         vae_z_sigma = Lambda(convert_to_sigma, name='sigma')(vae_z_log_var)
 
         vae_z = Lambda(sampling, name='z')([vae_z_mean, vae_z_sigma])

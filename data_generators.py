@@ -115,7 +115,7 @@ def brownian_data_generator(dir_with_src_images, base_image_filename, object_ima
     #print("L: ", L)
     a = 0
     replace_robots = True
-    P_greed = 1. / 33. #1 / 20. #1 / 33.
+    P_greed = 1. / 2. #1 / 20. #1 / 33.
    
     iteration = -1
     
