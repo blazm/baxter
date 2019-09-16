@@ -31,6 +31,11 @@ from world_models_vae_arch import build_vae_world_model
 from data_generators import data_generator, data_generator_mnist, random_data_generator, brownian_data_generator
 from utils import load_parameters, list_images_recursively
 
+from numpy.random import seed
+seed(6)
+from tensorflow import set_random_seed
+set_random_seed(6)
+
 def prepare_optimizer_object(optimizer_string, lr=0.001):
     # TODO: create Adam, AdamW with custom parameters if needed
     from AdamW import AdamW
@@ -90,7 +95,7 @@ if __name__ == "__main__":
     
     from pathlib import Path
     # random generator config
-    dir_with_src_images = Path('data/generated_simple/')
+    dir_with_src_images = Path('data/generated/') # _simple
     base_image = 'median_image.png'
     object_images = ['circle-red.png', 'robo-green.png'] # circle in the first place, as robo can be drawn over it
 
@@ -310,6 +315,12 @@ if __name__ == "__main__":
         #plot(history)
 
     if do_test:
+                
+        from numpy.random import seed
+        seed(6)
+        from tensorflow import set_random_seed
+        set_random_seed(6)
+
         batch_size = 16
         resized_objects = []
 

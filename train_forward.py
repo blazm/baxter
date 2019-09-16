@@ -37,13 +37,22 @@ seed(6)
 from tensorflow import set_random_seed
 set_random_seed(6)
 
-def resize_images(images, dims=(8, 8, 3)):
+def resize_images(images, dims=(8, 8, 1)):
     #print("imgm ax: ", images.max())
-    resized = np.zeros((len(images), dims[0], dims[1], 1), dtype=float)
+    resized = np.zeros((len(images), dims[0], dims[1], dims[2]), dtype=float)
     for i in range(len(images)):
-        tmp = imresize(images[i], size=(dims[0], dims[1]), interp='nearest') / 255.0
+        #print(images[i].shape)
+        if dims[2] == 1:
+            tmp = imresize(images[i], size=(dims[0], dims[1]), interp='nearest') / 255.0
+        else:
+            tmp = imresize(images[i][:, :, 0], size=(dims[0], dims[1]), interp='bilinear') / 255.0
     #    imsave('tmp/test_{}.png'.format(i), tmp)
-        resized[i][:, :, 0] = (tmp[:, :, 0]).astype(float)
+        if dims[2] == 1:
+            resized[i][:, :, 0] = (tmp[:, :, 0]).astype(float)
+        else:
+            resized[i][:, :, 0] = (tmp[:, :]).astype(float)
+            resized[i][:, :, 1] = (tmp[:, :]).astype(float)
+            resized[i][:, :, 2] = (tmp[:, :]).astype(float)
     #exit()
     #print("imgm ax: ", resized.max(), resized.min())
     return resized
@@ -52,7 +61,7 @@ if __name__ == "__main__":
     
     from pathlib import Path
     # random generator config
-    dir_with_src_images = Path('data/generated_simple/')
+    dir_with_src_images = Path('data/generated/') # _simple
     base_image = 'median_image.png'
     object_images = ['circle-red.png', 'robo-green.png'] # circle in the first place, as robo can be drawn over it
 
@@ -115,21 +124,24 @@ if __name__ == "__main__":
     #os.environ["CUDA_VISIBLE_DEVICES"]="0" # on the mobo
 
     # # load best models that we have
-    '''
+    #'''
     # best AE
     model_label = 'simple_ae_conv'
-    latent_size = 64
-    conv_layers = 3
+    latent_size = 64 #64
+    conv_layers = 3 #3
     '''
     # best VAE
     model_label = 'simple_vaewm'
-    latent_size = 64
-    conv_layers = 3
+    latent_size = 16 #64
+    conv_layers = 4#3
     #'''
 
     back_attention = 0.2
     obj_attention = 0.8
     size_factor = 3.0
+
+    if train_without_ae:
+        model_label = 'simple_nn'
 
     # vae from world models
     if 'vaewm' in model_label:
@@ -144,14 +156,15 @@ if __name__ == "__main__":
             opt=opt, loss=loss, 
             conv_layers=conv_layers, initial_filters=num_filters) #, kernel_size=kernel_size, kernel_mult=kernel_mult)
 
-
+    
     experiment_label = "{}.osize-{}.oatt-{}.e{}.bs{}.lat{}.c{}.opt-{}.loss-{}".format(
         model_label, size_factor, obj_attention, num_epochs, batch_size,
         "{:02d}".format(latent_size) if type(latent_size) == int else 'x'.join(map(str,latent_size[1:])), 
         conv_layers, opt, loss)
     
-    print("Preloading weights from previous model: {}".format(experiment_label))
-    autoencoder.load_weights('trained_models/{}.h5'.format(experiment_label), by_name=True)
+    if not train_without_ae:
+        print("Preloading weights from previous model: {}".format(experiment_label))
+        autoencoder.load_weights('trained_models/{}.h5'.format(experiment_label), by_name=True)
 
     print("latent size: ", latent_size)
     
@@ -282,15 +295,26 @@ if __name__ == "__main__":
         plt.plot(history, color='red')
         plt.plot(val_history, color='blue')
         #plt.show()
-        fig.savefig('snapshots/forward_loss_{}.png'.format(experiment_label), bbox_inches='tight')
+        fig.savefig('snapshots/forward_loss_{}_{}.png'.format("diff" if residual_forward else "nodiff", experiment_label), bbox_inches='tight')
 
-        forward_model.save('trained_models/forward_model_{}.h5'.format(experiment_label))
+        forward_model.save('trained_models/forward_model_{}_{}.h5'.format("diff" if residual_forward else "nodiff", experiment_label))
 
     if do_test:
-        forward_model.load_weights('trained_models/forward_model_{}.h5'.format(experiment_label))
+
+        from numpy.random import seed
+        seed(9)
+        from tensorflow import set_random_seed
+        set_random_seed(9)
+        
+        batch_size = 64
+
+        forward_model.load_weights('trained_models/forward_model_{}_{}.h5'.format("diff" if residual_forward else "nodiff", experiment_label))
+
+        resized_objects = []
 
         # test the trained forward model:
-        valid_generator = brownian_data_generator(dir_with_src_images, base_image, object_images, img_shape=img_shape, batch_size=batch_size+1)
+        valid_generator = brownian_data_generator(dir_with_src_images, base_image, object_images, 
+                                                  img_shape=img_shape, batch_size=batch_size+1, resized_objects=resized_objects)
         
         h,w,ch = img_shape
         x_test = np.zeros((batch_size+1, h, w, ch))
@@ -356,9 +380,18 @@ if __name__ == "__main__":
             decoded_imgs = decoder.predict(encoded_imgs)
         else:
             decoded_imgs = x_test
-            decoded_imgs_t_plus_1 = np.zeros(decoded_imgs.shape)
-            decoded_imgs_t_plus_1[0:-1] = x_test[1:]
-            decoded_imgs_t_plus_1[-1] = x_test[0]
+            #decoded_imgs_t_plus_1 = np.zeros(decoded_imgs.shape)
+
+            if len(encoded_imgs.shape) > 2:
+                bs, h, w, ch = encoded_imgs.shape
+                tmp = np.reshape(encoded_imgs_t_plus_1, (bs, h, w, ch))
+                print(encoded_imgs.shape, encoded_imgs_t_plus_1.shape)
+                decoded_imgs_t_plus_1 = resize_images(tmp, dims=(64, 64, 3))
+            else:
+                print(encoded_imgs.shape, encoded_imgs_t_plus_1.shape)
+                decoded_imgs_t_plus_1 = resize_images(encoded_imgs_t_plus_1, dims=(64, 64, 3)) 
+            #decoded_imgs_t_plus_1[0:-1] = x_test[1:]
+            #decoded_imgs_t_plus_1[-1] = x_test[0]
             #print(len(x_test), len(decoded_imgs), len(decoded_imgs_t_plus_1))
             #exit()
 
@@ -389,6 +422,111 @@ if __name__ == "__main__":
             mpl.use('Agg')
 
         import matplotlib.pyplot as plt
+
+        # TODO: evaluate the reconstructed images
+        from data_generators import cdist, max_cdist
+
+        threshold = .2
+        h, w, ch = img_shape
+        class_masks_R = np.zeros((batch_size, h, w, 3))
+        class_masks_B = np.zeros((batch_size, h, w, 3))
+        
+        print("resized objects: ", resized_objects[0].shape)
+        avg_robot1 = resized_objects[0][:,:,:3].mean(axis=(0,1))
+        avg_robot2 = resized_objects[1][:,:,:3].mean(axis=(0,1))
+        
+        print(avg_robot1, avg_robot2)
+        
+        robot1 = np.ones((h, w, ch)) * avg_robot1
+        robot2 = np.ones((h, w, ch)) * avg_robot2
+
+        def mse(A, B):
+            return ((A - B)**2).mean(axis=None) # None == scalar value
+
+        def rmse(A, B):
+            return np.sqrt(mse(A, B))
+
+        IoUs = np.zeros(batch_size)
+        minRBs = np.zeros(batch_size)
+        mseRs = np.zeros(batch_size)
+        mseBs = np.zeros(batch_size)
+
+        for i in range(1, x_test.shape[0]):
+            original = x_test[i]
+            mask = x_mask[i]#.astype(int)
+            
+            reconstructed = decoded_imgs_t_plus_1[i-1]
+            #print(original.max(), original.min(), reconstructed.max(), reconstructed.min())
+            # pass the positive mask pixels:
+            #N_R = mask[(mask / obj_attention) >= .5].shape[0]
+            #N_B = mask[(mask / obj_attention) < .5].shape[0]
+            tmp = cdist(background, original, keepdims=True) # color distance between images
+            #tmp = (background - original) # np.abs
+            juan_mask = (tmp > threshold*max_cdist).astype(float) #( tmp > 0 ).astype(float) 
+            #juan_mask = (np.abs(mask - obj_attention) < .001).astype(float) # mask for the robot
+            zero_mask = (~(juan_mask).astype(bool)).astype(float) #((mask - obj_attention) < .5).astype(float) # mask for the background
+            #print("robot pixels mask", mask[(mask / obj_attention) > .5].shape)
+            #print("back pixels mask", mask[(mask / obj_attention) < .5].shape)
+            #print(juan_mask.shape, juan_mask.max(), juan_mask.min())
+
+            #'''
+            cond_R = juan_mask[:, :, 0].astype(bool) == True
+            cond_B = zero_mask[:, :, 0].astype(bool) == True
+            class_masks_R[i][:, :, 1][cond_R] = (cdist(juan_mask * original, juan_mask * reconstructed) < threshold*max_cdist)[cond_R] # RR
+            class_masks_R[i][:, :, 0][cond_R] = (cdist(juan_mask * background, juan_mask * reconstructed) < threshold*max_cdist)[cond_R] # RB
+            class_masks_R[i][:, :, 0][cond_R] = (~class_masks_R[i][:, :, 1].astype(bool) & class_masks_R[i][:, :, 0].astype(bool))[cond_R]
+            class_masks_R[i][:, :, 2][cond_R] = (~class_masks_R[i][:, :, 1].astype(bool) & ~class_masks_R[i][:, :, 0].astype(bool))[cond_R] # RX
+            
+            class_masks_B[i][:, :, 1][cond_B] = (cdist(zero_mask * original, zero_mask * reconstructed) < threshold*max_cdist)[cond_B] # BB
+            class_masks_B[i][:, :, 0][cond_B] = (np.minimum(cdist(zero_mask * robot1, zero_mask * reconstructed),
+                                                            cdist(zero_mask * robot2, zero_mask * reconstructed)) < threshold*max_cdist)[cond_B] # B(R1,R2)
+            class_masks_B[i][:, :, 0][cond_B] = (~class_masks_B[i][:, :, 1].astype(bool) & class_masks_B[i][:, :, 0].astype(bool))[cond_B]
+            
+            class_masks_B[i][:, :, 2][cond_B] = (~class_masks_B[i][:, :, 1].astype(bool) & ~class_masks_B[i][:, :, 0].astype(bool))[cond_B] # BX
+            
+            N_RR = np.sum(class_masks_R[i][:, :, 1][cond_R]) #[class_masks_R[i][:, :, 0] > .5].shape[0]
+            N_RB = np.sum(class_masks_R[i][:, :, 0][cond_R]) 
+            N_RX = np.sum(class_masks_R[i][:, :, 2][cond_R]) 
+
+            N_BR = np.sum(class_masks_B[i][:, :, 0][cond_B]) #[class_masks_B[i][:, :, 1] > .5].shape[0]
+        
+            if N_RR + N_RB + N_RX < 0.1:
+                IoU = 0
+                __R = 0
+                __B = 0    
+            else:
+                IoU = N_RR / (N_RR + N_BR + N_RB + N_RX)
+                __R = N_RR / (N_RR + N_RB + N_RX)  
+                __B = 1.0 / ((N_BR / (N_RR + N_RB + N_RX)) + 1.0) 
+            
+            minRB = min(__R, __B)
+            #print("N_R: ", N_R, "N_RR: ", N_RR, " N_RB: ", N_RB, " N_RX: ", N_RX, " N_BR: ", N_BR)
+            
+            IoUs[i] = IoU
+            minRBs[i] = minRB
+
+            mseRs[i] = mse(juan_mask * original, juan_mask * reconstructed)
+            mseBs[i] = mse(zero_mask * original, zero_mask * reconstructed)
+
+            #print(class_masks_B[i].shape, class_masks_B[i].max(), class_masks_B[i].min())
+            label = str(np.random.randint(0, 1000))
+            
+            '''
+            imsave("tmp/{}.png".format("{}_original".format(label)), x_test[i])
+            imsave("tmp/{}.png".format("{}_decoded".format(label)), decoded_imgs[i])
+            imsave("tmp/{}.png".format("{}_Cmask_B".format(label)), class_masks_B[i])
+            imsave("tmp/{}.png".format("{}_Cmask_R".format(label)), class_masks_R[i])
+            imsave("tmp/{}.png".format("{}_Cmask_combo".format(label)), (class_masks_R[i].astype(int) + class_masks_B[i].astype(int)).astype(int))
+            '''        
+            #if i > 5:
+            #    exit()
+        #print("avg. IoU: ", IoUs.mean(), " - ", IoUs.std(), "avg min(R,B): ", minRBs.mean(), " - ", minRBs.std())
+        np.savetxt('snapshots/forward_{}_{}.eval'.format("diff" if residual_forward else "nodiff", experiment_label), 
+            [mseRs.mean(), mseRs.std(),
+            mseBs.mean(), mseBs.std(),   
+            IoUs.mean(), IoUs.std(), 
+            minRBs.mean(), minRBs.std()],
+             delimiter=",", fmt='%1.5f', newline=' ')
 
         n = batch_size
         fig = plt.figure(figsize=(int(n * 2.5), int(n * 0.5))) # 20,4 if 10 imgs
@@ -486,4 +624,4 @@ if __name__ == "__main__":
             else:
                 ax.get_yaxis().set_visible(False)
         
-        fig.savefig('snapshots/forward_{}.pdf'.format(experiment_label), bbox_inches='tight')
+        fig.savefig('snapshots/forward_{}_{}.pdf'.format("diff" if residual_forward else "nodiff", experiment_label), bbox_inches='tight')
